@@ -6,17 +6,6 @@ import json
 from datetime import datetime
 import os
 
-from pydrive.auth import GoogleAuth
-from pydrive.drive import GoogleDrive
-class CloudStorageAPI:
-    def __init__(self):
-        gauth = GoogleAuth()
-        gauth.LocalWebserverAuth()
-        self.drive = GoogleDrive(gauth)
-    def upload_file(self, filename, data):
-        file = self.drive.CreateFile({'title': filename})
-        file.SetContentString(data)
-        file.Upload()
 
 # ------------------------------------------------------------------
 # VERSION MANAGEMENT CLASS 
@@ -59,7 +48,8 @@ class LCAVersionManager:
         filename = f"{version_name}.json"
         filepath = os.path.join(self.storage_dir, filename)
         
-        self.cloud_storage.upload_file(filename, json.dumps(version_data))
+        with open(filepath, 'w') as f:
+        json.dump(version_data, f)
         
         # Update metadata
         metadata[version_name] = {
@@ -85,7 +75,8 @@ class LCAVersionManager:
         filepath = os.path.join(self.storage_dir, filename)
         
         try:
-            version_data = self.cloud_storage.download_file(filename)
+            with open(filepath, 'r') as f:
+            version_data = json.load(f)
             return version_data['assessment_data'], f"Version '{version_name}' loaded successfully!"
         except FileNotFoundError:
             return None, f"File for version '{version_name}' not found!"
