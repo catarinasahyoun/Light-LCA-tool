@@ -76,7 +76,7 @@ class LCAVersionManager:
         
         try:
             with open(filepath, 'r') as f:
-            version_data = json.load(f)
+                version_data = json.load(f)
             return version_data['assessment_data'], f"Version '{version_name}' loaded successfully!"
         except FileNotFoundError:
             return None, f"File for version '{version_name}' not found!"
