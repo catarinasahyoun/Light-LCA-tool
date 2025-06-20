@@ -1,4 +1,3 @@
-import streamlit as st
-
-st.title("Hello, World! Welcome to the LCA Sustainability Tool")
-st.write("This is a basic Streamlit app running from VS Code.")
+streamlit
+pandas
+plotly
