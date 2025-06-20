@@ -49,7 +49,7 @@ class LCAVersionManager:
         filepath = os.path.join(self.storage_dir, filename)
         
         with open(filepath, 'w') as f:
-        json.dump(version_data, f)
+            json.dump(version_data, f)
         
         # Update metadata
         metadata[version_name] = {
