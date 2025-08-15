@@ -601,49 +601,48 @@ st.session_state.current_assessment_data = {
 st.session_state.final_summary_html = final_summary_html
 
 # ------------------------------------------------------------------
-# VISUALIZATION: SEPARATE BAR CHARTS FOR EACH ATTRIBUTE
+# VISUALIZATION: SEPARATE BAR CHARTS FOR EACH ATTRIBUTE (PDF style)
 # ------------------------------------------------------------------
 st.markdown("## 📊 Comparison Visualizations")
 
 df_compare = pd.DataFrame(comparison_data)
 my_color_sequence = ['#2E7D32', '#388E3C', '#4CAF50', '#66BB6A', '#81C784']
 
+# Keep order of materials consistent with user selection
+df_compare["Material"] = pd.Categorical(df_compare["Material"], categories=selected_materials, ordered=True)
+
 # Create chart containers
 col1, col2 = st.columns(2)
 
 with col1:
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-    # CO₂e per kg Comparison Chart.
     fig_co2 = px.bar(
-        df_compare, x="Material", y="CO2e per kg",
-        color="Material", title="🏭 CO₂e per kg Comparison",
-        color_discrete_sequence=my_color_sequence
+        df_compare,
+        x="Material",
+        y="CO2e per kg",
+        color="Material",
+        title="🏭 CO₂e per kg Comparison",
+        color_discrete_sequence=my_color_sequence,
+        category_orders={"Material": selected_materials}
     )
-    fig_co2.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#2E7D32'),
-        title_font_size=18,
-        title_x=0.5
-    )
+    fig_co2.update_traces(texttemplate='%{y:.1f}', textposition='outside')
+    fig_co2.update_layout(**plotly_layout_update, yaxis_title="kg CO₂e")
     st.plotly_chart(fig_co2, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col2:
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-    # Recycled Content (%) Comparison Chart.
     fig_recycled = px.bar(
-        df_compare, x="Material", y="Recycled Content (%)",
-        color="Material", title="♻️ Recycled Content Comparison",
-        color_discrete_sequence=my_color_sequence
+        df_compare,
+        x="Material",
+        y="Recycled Content (%)",
+        color="Material",
+        title="♻️ Recycled Content Comparison",
+        color_discrete_sequence=my_color_sequence,
+        category_orders={"Material": selected_materials}
     )
-    fig_recycled.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#2E7D32'),
-        title_font_size=18,
-        title_x=0.5
-    )
+    fig_recycled.update_traces(texttemplate='%{y:.1f}%', textposition='outside')
+    fig_recycled.update_layout(**plotly_layout_update, yaxis_title="%")
     st.plotly_chart(fig_recycled, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -651,30 +650,30 @@ col3, col4 = st.columns(2)
 
 with col3:
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-    # Circularity Comparison Chart.
     fig_circularity = px.bar(
-        df_compare, x="Material", y="Circularity (mapped)",
-        color="Material", title="🔄 Circularity Comparison",
-        color_discrete_sequence=my_color_sequence
+        df_compare,
+        x="Material",
+        y="Circularity (mapped)",
+        color="Material",
+        title="🔄 Circularity Comparison",
+        color_discrete_sequence=my_color_sequence,
+        category_orders={"Material": selected_materials}
     )
+    fig_circularity.update_traces(texttemplate='%{y}', textposition='outside')
     fig_circularity.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#2E7D32'),
-        title_font_size=18,
-        title_x=0.5,
+        **plotly_layout_update,
         yaxis=dict(
             tickmode='array',
             tickvals=[0, 1, 2, 3],
             ticktext=['Not Circular', 'Low', 'Medium', 'High']
-        )
+        ),
+        yaxis_title="Circularity"
     )
     st.plotly_chart(fig_circularity, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col4:
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-    # Lifetime Comparison Chart.
     df_compare["Lifetime Category"] = df_compare["Lifetime (years)"].apply(lifetime_category)
     lifetime_cat_to_num = {"Short": 1, "Medium": 2, "Long": 3}
     df_compare["Lifetime"] = df_compare["Lifetime Category"].map(lifetime_cat_to_num)
@@ -684,19 +683,18 @@ with col4:
         y="Lifetime",
         color="Material",
         title="⏱️ Lifetime Comparison",
-        color_discrete_sequence=my_color_sequence
+        color_discrete_sequence=my_color_sequence,
+        category_orders={"Material": selected_materials}
     )
+    fig_lifetime.update_traces(texttemplate='%{y}', textposition='outside')
     fig_lifetime.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#2E7D32'),
-        title_font_size=18,
-        title_x=0.5,
+        **plotly_layout_update,
         yaxis=dict(
             tickmode='array',
             tickvals=[1, 2, 3],
             ticktext=["Short", "Medium", "Long"]
-        )
+        ),
+        yaxis_title="Lifetime Category"
     )
     st.plotly_chart(fig_lifetime, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
@@ -706,4 +704,5 @@ with col4:
 # ------------------------------------------------------------------
 if hasattr(st.session_state, 'loaded_version_data'):
     del st.session_state.loaded_version_data
+
 
