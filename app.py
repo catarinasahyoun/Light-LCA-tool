@@ -119,7 +119,7 @@ if "current_assessment_data" not in st.session_state:
     st.session_state.current_assessment_data = {}
 
 # ------------------------------------------------------------------
-# PAGE CONFIGURATION & CUSTOM CSS (PDF-style)
+# PAGE CONFIGURATION & CUSTOM CSS
 # ------------------------------------------------------------------
 st.set_page_config(
     page_title="Easy LCA Indicator",
@@ -129,97 +129,210 @@ st.set_page_config(
 
 custom_css = """
 <style>
-    /* Main app background: light green gradient like PDF */
+    /* Main app styling */
     .stApp {
-        background: linear-gradient(135deg, #F8FBF7 0%, #EDF6ED 100%);
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #F1F8E9 0%, #E8F5E8 100%);
     }
-
-    /* Main header */
+    
+    /* Header styling */
     .primary-header {
-        color: #2E7D32;
-        text-align: center;
-        font-size: 2.8rem;
-        font-weight: 700;
-        margin-bottom: 1rem;
-    }
-
-    /* Section titles */
-    h2, h3 {
         color: #2E7D32 !important;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
+        text-align: center;
+        font-size: 3rem !important;
         font-weight: 700 !important;
+        margin-bottom: 2rem !important;
+        text-shadow: 2px 2px 4px rgba(46, 125, 50, 0.1);
     }
-
-    /* Sidebar style: flat green, minimal shadows */
+    
+    /* Sidebar styling */
     .css-1d391kg {
-        background: #2E7D32 !important;
+        background: linear-gradient(180deg, #2E7D32 0%, #388E3C 100%) !important;
+    }
+    
+    /* Sidebar text color */
+    .css-1d391kg .element-container {
         color: white !important;
     }
-
-    /* Metric cards: cleaner, smaller padding */
-    .metric-card {
-        background: #FFFFFF;
+    
+    /* Version section styling */
+    .version-section {
+        background: linear-gradient(135deg, #E8F5E8 0%, #F1F8E9 100%);
+        padding: 25px;
+        border-radius: 15px;
+        border: 3px solid #4CAF50;
+        margin: 20px 0;
+        box-shadow: 0 8px 25px rgba(76, 175, 80, 0.15);
+        backdrop-filter: blur(10px);
+    }
+    
+    /* Success message styling */
+    .version-success {
+        background: linear-gradient(135deg, #DFF2BF 0%, #C8E6C8 100%);
+        color: #2E7D32;
+        padding: 15px;
+        border-radius: 10px;
+        margin: 15px 0;
+        border-left: 5px solid #4CAF50;
+        box-shadow: 0 4px 15px rgba(79, 138, 16, 0.2);
+        font-weight: 600;
+    }
+    
+    /* Error message styling */
+    .version-error {
+        background: linear-gradient(135deg, #FFD2D2 0%, #FFCDD2 100%);
+        color: #C62828;
+        padding: 15px;
+        border-radius: 10px;
+        margin: 15px 0;
+        border-left: 5px solid #F44336;
+        box-shadow: 0 4px 15px rgba(216, 0, 12, 0.2);
+        font-weight: 600;
+    }
+    
+    /* Material section styling */
+    .material-section {
+        background: rgba(255, 255, 255, 0.9);
+        padding: 25px;
+        border-radius: 15px;
+        margin: 20px 0;
         border: 2px solid #81C784;
-        border-radius: 10px;
-        padding: 15px;
+        box-shadow: 0 6px 20px rgba(129, 199, 132, 0.2);
+        backdrop-filter: blur(5px);
+    }
+    
+    /* Summary section styling */
+    .summary-section {
+        background: linear-gradient(135deg, #E1F5FE 0%, #F3E5F5 100%);
+        padding: 30px;
+        border-radius: 20px;
+        margin: 30px 0;
+        border: 3px solid #4CAF50;
+        box-shadow: 0 10px 30px rgba(76, 175, 80, 0.25);
+    }
+    
+    .summary-section h2 {
+        color: #2E7D32 !important;
         text-align: center;
+        margin-bottom: 25px !important;
+        font-size: 2.5rem !important;
+        font-weight: 700 !important;
     }
-    .metric-card h3 {
-        font-size: 1rem;
-        margin-bottom: 0.5rem;
+    
+    .summary-section h3 {
+        color: #388E3C !important;
+        margin-top: 25px !important;
+        font-size: 1.8rem !important;
     }
-    .metric-card p {
-        font-size: 1.2rem;
-        font-weight: bold;
-        margin: 0;
+    
+    .summary-section p {
+        font-size: 1.2rem !important;
+        font-weight: 600 !important;
+        margin: 15px 0 !important;
+        color: #2E7D32 !important;
     }
-
-    /* Chart container: flat white background */
+    
+    .summary-section ul {
+        font-size: 1.1rem !important;
+        color: #388E3C !important;
+    }
+    
+    /* Info box styling */
+    .info-box {
+        background: linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 100%);
+        padding: 20px;
+        border-radius: 12px;
+        border-left: 5px solid #2196F3;
+        margin: 15px 0;
+        box-shadow: 0 4px 12px rgba(33, 150, 243, 0.15);
+    }
+    
+    /* Metric cards */
+    .metric-card {
+        background: rgba(255, 255, 255, 0.95);
+        padding: 20px;
+        border-radius: 12px;
+        border: 2px solid #81C784;
+        margin: 10px;
+        text-align: center;
+        box-shadow: 0 6px 18px rgba(129, 199, 132, 0.2);
+        transition: transform 0.3s ease;
+    }
+    
+    .metric-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 25px rgba(129, 199, 132, 0.3);
+    }
+    
+    /* Button styling */
+    .stButton > button {
+        background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 10px !important;
+        padding: 12px 24px !important;
+        font-weight: 600 !important;
+        font-size: 1rem !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3) !important;
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4) !important;
+    }
+    
+    /* Input field styling */
+    .stNumberInput > div > div > input {
+        border: 2px solid #81C784 !important;
+        border-radius: 8px !important;
+        padding: 10px !important;
+        background: rgba(255, 255, 255, 0.9) !important;
+    }
+    
+    .stSelectbox > div > div > div {
+        border: 2px solid #81C784 !important;
+        border-radius: 8px !important;
+        background: rgba(255, 255, 255, 0.9) !important;
+    }
+    
+    /* Chart container styling */
     .chart-container {
-        background: #FFFFFF;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #E0E0E0;
+        background: rgba(255, 255, 255, 0.95);
+        padding: 20px;
+        border-radius: 15px;
+        margin: 20px 0;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+        border: 2px solid #E0E0E0;
     }
-
-    /* Remove Streamlit menu/footer */
+    
+    /* Hide Streamlit menu and footer */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
+    
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+        width: 12px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: #F1F8E9;
+        border-radius: 10px;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: linear-gradient(135deg, #4CAF50, #2E7D32);
+        border-radius: 10px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(135deg, #2E7D32, #1B5E20);
+    }
 </style>
 """
 st.markdown(custom_css, unsafe_allow_html=True)
-st.markdown('<h1 class="primary-header">🌿 Easy LCA Indicator</h1>', unsafe_allow_html=True)
-
-# ------------------------------------------------------------------
-# UPDATED PLOTLY LAYOUT SETTINGS
-# ------------------------------------------------------------------
-plotly_layout_update = dict(
-    plot_bgcolor='rgba(0,0,0,0)',
-    paper_bgcolor='rgba(0,0,0,0)',
-    font=dict(color='#2E7D32', size=14),
-    title_font=dict(size=18, color='#2E7D32', family="Segoe UI"),
-    title_x=0.5,
-    margin=dict(t=60, b=50, l=50, r=50),
-    bargap=0.3,
-    legend=dict(font=dict(size=12))
-)
-
-# Example applying updated layout to CO₂e per kg chart
-fig_co2 = px.bar(
-    df_compare, 
-    x="Material", 
-    y="CO2e per kg",
-    color="Material", 
-    title="🏭 CO₂e per kg Comparison",
-    color_discrete_sequence=my_color_sequence,
-    category_orders={"Material": selected_materials}  # match PDF order
-)
-fig_co2.update_traces(texttemplate='%{y:.1f}', textposition='outside')
-fig_co2.update_layout(**plotly_layout_update, yaxis_title="kg CO₂e")
-
-# Repeat layout for other charts (recycled, circularity, lifetime)
-
+st.markdown('<h1 class="primary-header">🌿 Easy LCA Indicator </h1>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
 # VERSION MANAGEMENT SIDEBAR
@@ -601,48 +714,49 @@ st.session_state.current_assessment_data = {
 st.session_state.final_summary_html = final_summary_html
 
 # ------------------------------------------------------------------
-# VISUALIZATION: SEPARATE BAR CHARTS FOR EACH ATTRIBUTE (PDF style)
+# VISUALIZATION: SEPARATE BAR CHARTS FOR EACH ATTRIBUTE
 # ------------------------------------------------------------------
 st.markdown("## 📊 Comparison Visualizations")
 
 df_compare = pd.DataFrame(comparison_data)
 my_color_sequence = ['#2E7D32', '#388E3C', '#4CAF50', '#66BB6A', '#81C784']
 
-# Keep order of materials consistent with user selection
-df_compare["Material"] = pd.Categorical(df_compare["Material"], categories=selected_materials, ordered=True)
-
 # Create chart containers
 col1, col2 = st.columns(2)
 
 with col1:
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+    # CO₂e per kg Comparison Chart.
     fig_co2 = px.bar(
-        df_compare,
-        x="Material",
-        y="CO2e per kg",
-        color="Material",
-        title="🏭 CO₂e per kg Comparison",
-        color_discrete_sequence=my_color_sequence,
-        category_orders={"Material": selected_materials}
+        df_compare, x="Material", y="CO2e per kg",
+        color="Material", title="🏭 CO₂e per kg Comparison",
+        color_discrete_sequence=my_color_sequence
     )
-    fig_co2.update_traces(texttemplate='%{y:.1f}', textposition='outside')
-    fig_co2.update_layout(**plotly_layout_update, yaxis_title="kg CO₂e")
+    fig_co2.update_layout(
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#2E7D32'),
+        title_font_size=18,
+        title_x=0.5
+    )
     st.plotly_chart(fig_co2, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col2:
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+    # Recycled Content (%) Comparison Chart.
     fig_recycled = px.bar(
-        df_compare,
-        x="Material",
-        y="Recycled Content (%)",
-        color="Material",
-        title="♻️ Recycled Content Comparison",
-        color_discrete_sequence=my_color_sequence,
-        category_orders={"Material": selected_materials}
+        df_compare, x="Material", y="Recycled Content (%)",
+        color="Material", title="♻️ Recycled Content Comparison",
+        color_discrete_sequence=my_color_sequence
     )
-    fig_recycled.update_traces(texttemplate='%{y:.1f}%', textposition='outside')
-    fig_recycled.update_layout(**plotly_layout_update, yaxis_title="%")
+    fig_recycled.update_layout(
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#2E7D32'),
+        title_font_size=18,
+        title_x=0.5
+    )
     st.plotly_chart(fig_recycled, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -650,30 +764,30 @@ col3, col4 = st.columns(2)
 
 with col3:
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+    # Circularity Comparison Chart.
     fig_circularity = px.bar(
-        df_compare,
-        x="Material",
-        y="Circularity (mapped)",
-        color="Material",
-        title="🔄 Circularity Comparison",
-        color_discrete_sequence=my_color_sequence,
-        category_orders={"Material": selected_materials}
+        df_compare, x="Material", y="Circularity (mapped)",
+        color="Material", title="🔄 Circularity Comparison",
+        color_discrete_sequence=my_color_sequence
     )
-    fig_circularity.update_traces(texttemplate='%{y}', textposition='outside')
     fig_circularity.update_layout(
-        **plotly_layout_update,
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#2E7D32'),
+        title_font_size=18,
+        title_x=0.5,
         yaxis=dict(
             tickmode='array',
             tickvals=[0, 1, 2, 3],
             ticktext=['Not Circular', 'Low', 'Medium', 'High']
-        ),
-        yaxis_title="Circularity"
+        )
     )
     st.plotly_chart(fig_circularity, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col4:
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+    # Lifetime Comparison Chart.
     df_compare["Lifetime Category"] = df_compare["Lifetime (years)"].apply(lifetime_category)
     lifetime_cat_to_num = {"Short": 1, "Medium": 2, "Long": 3}
     df_compare["Lifetime"] = df_compare["Lifetime Category"].map(lifetime_cat_to_num)
@@ -683,18 +797,19 @@ with col4:
         y="Lifetime",
         color="Material",
         title="⏱️ Lifetime Comparison",
-        color_discrete_sequence=my_color_sequence,
-        category_orders={"Material": selected_materials}
+        color_discrete_sequence=my_color_sequence
     )
-    fig_lifetime.update_traces(texttemplate='%{y}', textposition='outside')
     fig_lifetime.update_layout(
-        **plotly_layout_update,
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#2E7D32'),
+        title_font_size=18,
+        title_x=0.5,
         yaxis=dict(
             tickmode='array',
             tickvals=[1, 2, 3],
             ticktext=["Short", "Medium", "Long"]
-        ),
-        yaxis_title="Lifetime Category"
+        )
     )
     st.plotly_chart(fig_lifetime, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
@@ -704,5 +819,3 @@ with col4:
 # ------------------------------------------------------------------
 if hasattr(st.session_state, 'loaded_version_data'):
     del st.session_state.loaded_version_data
-
-
