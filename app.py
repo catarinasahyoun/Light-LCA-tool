@@ -1,821 +1,408 @@
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-import re
-import json
-from datetime import datetime
-import os
-
-
-# ------------------------------------------------------------------
-# VERSION MANAGEMENT CLASS 
-# ------------------------------------------------------------------
-class LCAVersionManager:
-    def __init__(self, storage_dir: str = "lca_versions"):
-        self.storage_dir = storage_dir
-        self.metadata_file = os.path.join(storage_dir, "lca_versions_metadata.json")
-        self._ensure_storage_dir()
-    
-    def _ensure_storage_dir(self):
-        if not os.path.exists(self.storage_dir):
-            os.makedirs(self.storage_dir)
-    
-    def _load_metadata(self):
-        if os.path.exists(self.metadata_file):
-            with open(self.metadata_file, 'r') as f:
-                return json.load(f)
-        return {}
-    
-    def _save_metadata(self, metadata):
-        with open(self.metadata_file, 'w') as f:
-            json.dump(metadata, f, indent=2)
-    
-    def save_version(self, version_name, assessment_data, description=""):
-        """Save complete LCA assessment data"""
-        metadata = self._load_metadata()
-        
-        if version_name in metadata:
-            return False, f"Version '{version_name}' already exists!"
-        
-        # Create version data structure
-        version_data = {
-            'assessment_data': assessment_data,
-            'timestamp': datetime.now().isoformat(),
-            'description': description
-        }
-        
-        # Save to file
-        filename = f"{version_name}.json"
-        filepath = os.path.join(self.storage_dir, filename)
-        
-        with open(filepath, 'w') as f:
-            json.dump(version_data, f)
-        
-        # Update metadata
-        metadata[version_name] = {
-            'filename': filename,
-            'description': description,
-            'created_at': datetime.now().isoformat(),
-            'materials_count': len(assessment_data.get('selected_materials', [])),
-            'total_co2': assessment_data.get('overall_co2', 0),
-            'lifetime_weeks': assessment_data.get('lifetime_weeks', 52)
-        }
-        
-        self._save_metadata(metadata)
-        return True, f"Version '{version_name}' saved successfully!"
-    
-    def load_version(self, version_name):
-        """Load LCA assessment data"""
-        metadata = self._load_metadata()
-        
-        if version_name not in metadata:
-            return None, f"Version '{version_name}' not found!"
-        
-        filename = metadata[version_name]['filename']
-        filepath = os.path.join(self.storage_dir, filename)
-        
-        try:
-            with open(filepath, 'r') as f:
-                version_data = json.load(f)
-            return version_data['assessment_data'], f"Version '{version_name}' loaded successfully!"
-        except FileNotFoundError:
-            return None, f"File for version '{version_name}' not found!"
-    
-    def list_versions(self):
-        """List all available versions"""
-        metadata = self._load_metadata()
-        return metadata
-    
-    def delete_version(self, version_name):
-        """Delete a version"""
-        metadata = self._load_metadata()
-        
-        if version_name not in metadata:
-            return False, f"Version '{version_name}' not found!"
-        
-        filename = metadata[version_name]['filename']
-        filepath = os.path.join(self.storage_dir, filename)
-        
-        try:
-            os.remove(filepath)
-        except FileNotFoundError:
-            pass
-        
-        del metadata[version_name]
-        self._save_metadata(metadata)
-        
-        return True, f"Version '{version_name}' deleted successfully!"
-
-# ------------------------------------------------------------------
-# SESSION-STATE INITIALIZATION for Versioning and Other Data
-# ------------------------------------------------------------------
-if "saved_versions" not in st.session_state:
-    st.session_state.saved_versions = {}
-if "final_summary_html" not in st.session_state:
-    st.session_state.final_summary_html = ""
-if "version_manager" not in st.session_state:
-    st.session_state.version_manager = LCAVersionManager()
-if "current_assessment_data" not in st.session_state:
-    st.session_state.current_assessment_data = {}
-
-# ------------------------------------------------------------------
-# PAGE CONFIGURATION & CUSTOM CSS
-# ------------------------------------------------------------------
-st.set_page_config(
-    page_title="Easy LCA Indicator",
-    page_icon="🌿",
-    layout="wide"
-)
-
-custom_css = """
-<style>
-    /* Main app styling */
-    .stApp {
-        background: linear-gradient(135deg, #F1F8E9 0%, #E8F5E8 100%);
-    }
-    
-    /* Header styling */
-    .primary-header {
-        color: #2E7D32 !important;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
-        text-align: center;
-        font-size: 3rem !important;
-        font-weight: 700 !important;
-        margin-bottom: 2rem !important;
-        text-shadow: 2px 2px 4px rgba(46, 125, 50, 0.1);
-    }
-    
-    /* Sidebar styling */
-    .css-1d391kg {
-        background: linear-gradient(180deg, #2E7D32 0%, #388E3C 100%) !important;
-    }
-    
-    /* Sidebar text color */
-    .css-1d391kg .element-container {
-        color: white !important;
-    }
-    
-    /* Version section styling */
-    .version-section {
-        background: linear-gradient(135deg, #E8F5E8 0%, #F1F8E9 100%);
-        padding: 25px;
-        border-radius: 15px;
-        border: 3px solid #4CAF50;
-        margin: 20px 0;
-        box-shadow: 0 8px 25px rgba(76, 175, 80, 0.15);
-        backdrop-filter: blur(10px);
-    }
-    
-    /* Success message styling */
-    .version-success {
-        background: linear-gradient(135deg, #DFF2BF 0%, #C8E6C8 100%);
-        color: #2E7D32;
-        padding: 15px;
-        border-radius: 10px;
-        margin: 15px 0;
-        border-left: 5px solid #4CAF50;
-        box-shadow: 0 4px 15px rgba(79, 138, 16, 0.2);
-        font-weight: 600;
-    }
-    
-    /* Error message styling */
-    .version-error {
-        background: linear-gradient(135deg, #FFD2D2 0%, #FFCDD2 100%);
-        color: #C62828;
-        padding: 15px;
-        border-radius: 10px;
-        margin: 15px 0;
-        border-left: 5px solid #F44336;
-        box-shadow: 0 4px 15px rgba(216, 0, 12, 0.2);
-        font-weight: 600;
-    }
-    
-    /* Material section styling */
-    .material-section {
-        background: rgba(255, 255, 255, 0.9);
-        padding: 25px;
-        border-radius: 15px;
-        margin: 20px 0;
-        border: 2px solid #81C784;
-        box-shadow: 0 6px 20px rgba(129, 199, 132, 0.2);
-        backdrop-filter: blur(5px);
-    }
-    
-    /* Summary section styling */
-    .summary-section {
-        background: linear-gradient(135deg, #E1F5FE 0%, #F3E5F5 100%);
-        padding: 30px;
-        border-radius: 20px;
-        margin: 30px 0;
-        border: 3px solid #4CAF50;
-        box-shadow: 0 10px 30px rgba(76, 175, 80, 0.25);
-    }
-    
-    .summary-section h2 {
-        color: #2E7D32 !important;
-        text-align: center;
-        margin-bottom: 25px !important;
-        font-size: 2.5rem !important;
-        font-weight: 700 !important;
-    }
-    
-    .summary-section h3 {
-        color: #388E3C !important;
-        margin-top: 25px !important;
-        font-size: 1.8rem !important;
-    }
-    
-    .summary-section p {
-        font-size: 1.2rem !important;
-        font-weight: 600 !important;
-        margin: 15px 0 !important;
-        color: #2E7D32 !important;
-    }
-    
-    .summary-section ul {
-        font-size: 1.1rem !important;
-        color: #388E3C !important;
-    }
-    
-    /* Info box styling */
-    .info-box {
-        background: linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 100%);
-        padding: 20px;
-        border-radius: 12px;
-        border-left: 5px solid #2196F3;
-        margin: 15px 0;
-        box-shadow: 0 4px 12px rgba(33, 150, 243, 0.15);
-    }
-    
-    /* Metric cards */
-    .metric-card {
-        background: rgba(255, 255, 255, 0.95);
-        padding: 20px;
-        border-radius: 12px;
-        border: 2px solid #81C784;
-        margin: 10px;
-        text-align: center;
-        box-shadow: 0 6px 18px rgba(129, 199, 132, 0.2);
-        transition: transform 0.3s ease;
-    }
-    
-    .metric-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 8px 25px rgba(129, 199, 132, 0.3);
-    }
-    
-    /* Button styling */
-    .stButton > button {
-        background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%) !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 10px !important;
-        padding: 12px 24px !important;
-        font-weight: 600 !important;
-        font-size: 1rem !important;
-        transition: all 0.3s ease !important;
-        box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3) !important;
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4) !important;
-    }
-    
-    /* Input field styling */
-    .stNumberInput > div > div > input {
-        border: 2px solid #81C784 !important;
-        border-radius: 8px !important;
-        padding: 10px !important;
-        background: rgba(255, 255, 255, 0.9) !important;
-    }
-    
-    .stSelectbox > div > div > div {
-        border: 2px solid #81C784 !important;
-        border-radius: 8px !important;
-        background: rgba(255, 255, 255, 0.9) !important;
-    }
-    
-    /* Chart container styling */
-    .chart-container {
-        background: rgba(255, 255, 255, 0.95);
-        padding: 20px;
-        border-radius: 15px;
-        margin: 20px 0;
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
-        border: 2px solid #E0E0E0;
-    }
-    
-    /* Hide Streamlit menu and footer */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    
-    /* Custom scrollbar */
-    ::-webkit-scrollbar {
-        width: 12px;
-    }
-    
-    ::-webkit-scrollbar-track {
-        background: #F1F8E9;
-        border-radius: 10px;
-    }
-    
-    ::-webkit-scrollbar-thumb {
-        background: linear-gradient(135deg, #4CAF50, #2E7D32);
-        border-radius: 10px;
-    }
-    
-    ::-webkit-scrollbar-thumb:hover {
-        background: linear-gradient(135deg, #2E7D32, #1B5E20);
-    }
-</style>
 """
-st.markdown(custom_css, unsafe_allow_html=True)
-st.markdown('<h1 class="primary-header">🌿 Easy LCA Indicator </h1>', unsafe_allow_html=True)
+Enhanced LCA Tool (Streamlit)
+- Modern visuals (cards, tabs, charts)
+- Simple user sign-in (demo)
+- Data entry via form or CSV upload
+- Downloadable HTML report + CSV export
+- Modular code for easy feature additions later
 
-# ------------------------------------------------------------------
-# VERSION MANAGEMENT SIDEBAR
-# ------------------------------------------------------------------
-st.sidebar.markdown('<div class="version-section">', unsafe_allow_html=True)
-st.sidebar.markdown("## 📁 Version Management")
+How to run:
+  pip install streamlit pandas numpy plotly
+  streamlit run app.py
 
-# Version Management Actions
-version_action = st.sidebar.selectbox(
-    "Choose Action:",
-    ["New Assessment", "Save Current", "Load Version", "Manage Versions"]
-)
+Notes:
+- Authentication here is a lightweight demo for local use. Replace with a proper auth provider (e.g., Auth0, Firebase, streamlit-authenticator) before production.
+- The visual design includes a clean theme plus a "Dark Neon" toggle.
+"""
 
-if version_action == "Save Current":
-    st.sidebar.markdown("### Save Current Assessment")
-    version_name = st.sidebar.text_input("Version Name:", key="save_version_name")
-    version_description = st.sidebar.text_area("Description (optional):", key="save_version_desc")
-    
-    if st.sidebar.button("💾 Save Version"):
-        if version_name and st.session_state.current_assessment_data:
-            success, message = st.session_state.version_manager.save_version(
-                version_name, st.session_state.current_assessment_data, version_description
-            )
-            if success:
-                st.sidebar.markdown(f'<div class="version-success">{message}</div>', unsafe_allow_html=True)
-            else:
-                st.sidebar.markdown(f'<div class="version-error">{message}</div>', unsafe_allow_html=True)
-        elif not version_name:
-            st.sidebar.error("Please enter a version name")
-        else:
-            st.sidebar.error("No assessment data to save. Complete an assessment first.")
+from __future__ import annotations
+import io
+import json
+import base64
+from dataclasses import dataclass
+from typing import List, Dict, Optional
 
-elif version_action == "Load Version":
-    st.sidebar.markdown("### Load Saved Version")
-    versions = st.session_state.version_manager.list_versions()
-    
-    if versions:
-        version_options = list(versions.keys())
-        selected_version = st.sidebar.selectbox("Select Version:", version_options)
-        
-        if selected_version:
-            version_info = versions[selected_version]
-            st.sidebar.write(f"**Description:** {version_info.get('description', 'No description')}")
-            st.sidebar.write(f"**Created:** {version_info.get('created_at', 'Unknown')}")
-            st.sidebar.write(f"**Materials:** {version_info.get('materials_count', 0)}")
-            st.sidebar.write(f"**Total CO₂:** {version_info.get('total_co2', 0):.2f} kg")
-            
-            if st.sidebar.button("📂 Load Version"):
-                data, message = st.session_state.version_manager.load_version(selected_version)
-                if data:
-                    # Store loaded data in session state
-                    st.session_state.loaded_version_data = data
-                    st.sidebar.success(message)
-                    st.sidebar.info("Data loaded! Refresh the page to apply the loaded configuration.")
-                else:
-                    st.sidebar.error(message)
-    else:
-        st.sidebar.info("No saved versions available")
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
 
-elif version_action == "Manage Versions":
-    st.sidebar.markdown("### Manage Versions")
-    versions = st.session_state.version_manager.list_versions()
-    
-    if versions:
-        version_to_delete = st.sidebar.selectbox("Select Version to Delete:", list(versions.keys()))
-        if st.sidebar.button("🗑️ Delete Version", type="secondary"):
-            success, message = st.session_state.version_manager.delete_version(version_to_delete)
-            if success:
-                st.sidebar.success(message)
-                st.rerun()
-            else:
-                st.sidebar.error(message)
-        
-        st.sidebar.markdown("### Version List")
-        for name, info in versions.items():
-            st.sidebar.write(f"**{name}**")
-            st.sidebar.write(f"  📅 {info.get('created_at', 'Unknown')[:10]}")
-            st.sidebar.write(f"  📊 {info.get('materials_count', 0)} materials")
-            st.sidebar.write("---")
-    else:
-        st.sidebar.info("No versions to manage")
+# ----------------------------
+# Theming / global page config
+# ----------------------------
+st.set_page_config(page_title="LCA Tool", page_icon="♻️", layout="wide")
 
-st.sidebar.markdown('</div>', unsafe_allow_html=True)
+# Inject optional custom CSS themes
+CUSTOM_CSS = """
+/* Clean baseline */
+:root { --brand: #0ea5e9; --brand-2: #22c55e; }
+.block-container { padding-top: 1.5rem; }
+/* Card style */
+.stMetric { background: #ffffff; border-radius: 16px; padding: 1rem; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+/* Section headers */
+section h2, .stTabs [data-baseweb="tab-list"] { font-weight: 700; }
+/* Dark Neon option */
+body.dark .block-container { background: #0b1220; }
+body.dark .stMetric { background: #0e1628; color: #f3f4f6; box-shadow: 0 2px 16px rgba(0,255,255,0.08); }
+body.dark .stButton>button, body.dark .stDownloadButton>button { background: linear-gradient(90deg,#00f5d4,#00bbf9); color: #0b1220; border: none; }
+body.dark .stSelectbox, body.dark .stTextInput, body.dark .stNumberInput { color: #e5e7eb; }
+"""
 
-# ------------------------------------------------------------------
-# GLOBAL INPUT: LIFETIME OF THE FINAL PRODUCT (in weeks)
-# ------------------------------------------------------------------
-# Check if we have loaded version data
-default_lifetime = 52
-if hasattr(st.session_state, 'loaded_version_data') and 'lifetime_weeks' in st.session_state.loaded_version_data:
-    default_lifetime = st.session_state.loaded_version_data['lifetime_weeks']
+# A light/dark toggle using a query param for persistence across reruns
+if "theme" not in st.session_state:
+    st.session_state.theme = st.experimental_get_query_params().get("theme", ["clean"]) [0]
 
-lifetime_weeks = st.number_input("Enter the lifetime of the final product (in weeks):",
-                                 min_value=1, value=default_lifetime, key="lifetime_weeks")
-lifetime_years = lifetime_weeks / 52
-
-# ------------------------------------------------------------------
-# HELPER FUNCTIONS
-# ------------------------------------------------------------------
-def extract_number(value):
-    """Extracts a float from a string, handling commas and text units."""
-    try:
-        return float(value)
-    except ValueError:
-        s = str(value).replace(',', '.')
-        match = re.search(r"[-+]?\d*\.?\d+", s)
-        return float(match.group()) if match else 0.0
-
-def extract_material_data(sheet_df):
-    """Reads Materials sheet dynamically and returns a materials_dict."""
-    sheet_df.columns = [str(c).strip() for c in sheet_df.columns]
-    expected_columns = [
-        "Material name", "CO2e (kg)", "Recycled Content", "EoL",
-        "Lifetime", "Comment", "Circularity", "Alternative Material"
-    ]
-    for col in expected_columns:
-        if col not in sheet_df.columns:
-            st.error(f"Error: '{col}' column is missing in Materials sheet.")
-            return {}
-    materials_dict = {}
-    for _, row in sheet_df.iterrows():
-        material_name = str(row["Material name"]).strip() if pd.notna(row["Material name"]) else ""
-        if not material_name:
-            continue
-        materials_dict[material_name] = {
-            "CO₂e (kg)": extract_number(row["CO2e (kg)"]),
-            "Recycled Content": extract_number(row["Recycled Content"]),
-            "EoL": str(row["EoL"]).strip() if pd.notna(row["EoL"]) else "Unknown",
-            "Lifetime": str(row["Lifetime"]).strip() if pd.notna(row["Lifetime"]) else "Unknown",
-            "Comment": str(row["Comment"]).strip() if pd.notna(row["Comment"]) and row["Comment"].strip() else "No comment",
-            "Circularity": str(row["Circularity"]).strip() if pd.notna(row["Circularity"]) else "Unknown",
-            "Alternative Material": str(row["Alternative Material"]).strip() if pd.notna(row["Alternative Material"]) else "None"
-        }
-    return materials_dict
-
-def extract_processes_data(sheet_df):
-    """Reads Processes sheet dynamically and returns a processes_dict."""
-    sheet_df.columns = [str(c).strip().replace("₂", "2").replace("CO₂", "CO2")
-                         for c in sheet_df.columns]
-    proc_col = next((c for c in sheet_df.columns if 'process' in c.lower()), None)
-    co2_col = next((c for c in sheet_df.columns if 'co2' in c.lower()), None)
-    unit_col = next((c for c in sheet_df.columns if 'unit' in c.lower()), None)
-    if not proc_col or not co2_col or not unit_col:
-        st.error("Error: Could not detect correct column names in 'Processes' sheet. Please check Excel formatting.")
-        return {}
-    processes_dict = {}
-    for _, row in sheet_df.iterrows():
-        proc_name = str(row[proc_col]).strip() if pd.notna(row[proc_col]) else ""
-        if not proc_name:
-            continue
-        processes_dict[proc_name] = {
-            "CO₂e": extract_number(row[co2_col]),
-            "Unit": str(row[unit_col]).strip() if pd.notna(row[unit_col]) else "Unknown"
-        }
-    return processes_dict
-
-def lifetime_category(lifetime_value):
-    """Converts a numeric lifetime value into a category: Short, Medium, or Long."""
-    if lifetime_value < 5:
-        return "Short"
-    elif lifetime_value <= 15:
-        return "Medium"
-    else:
-        return "Long"
-
-# ------------------------------------------------------------------
-# LOAD EXCEL FILE & DATA EXTRACTION
-# ------------------------------------------------------------------
-st.markdown("""
-<div class="info-box">
-    <h3 style="margin-top: 0; color: #1976D2;">📂 Upload Your Excel Database</h3>
-    <p style="margin-bottom: 0;">Upload your Excel file containing Materials and Processes sheets to begin the LCA assessment.</p>
-</div>
+st.markdown(f"""
+<style>
+{CUSTOM_CSS}
+</style>
+<script>
+const params = new URLSearchParams(window.location.search);
+const theme = params.get('theme') || '{st.session_state.theme}';
+document.body.classList.toggle('dark', theme === 'dark');
+</script>
 """, unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader("Upload Excel Database", type=["xlsx"])
-if not uploaded_file:
-    st.info("👆 Please upload your Excel database file to continue with the assessment.")
-    st.stop()
+# ----------------------------
+# Minimal demo authentication
+# ----------------------------
+@dataclass
+class User:
+    username: str
+    full_name: str
 
-xls = pd.ExcelFile(uploaded_file)
-df_materials = pd.read_excel(xls, sheet_name="Materials")
-materials_dict = extract_material_data(df_materials)
-df_processes = pd.read_excel(xls, sheet_name="Processes")
-processes_dict = extract_processes_data(df_processes)
-
-# ------------------------------------------------------------------
-# MATERIAL SELECTION & PROCESSING
-# ------------------------------------------------------------------
-# Check if we have loaded version data for material selection
-default_materials = []
-if hasattr(st.session_state, 'loaded_version_data') and 'selected_materials' in st.session_state.loaded_version_data:
-    default_materials = st.session_state.loaded_version_data['selected_materials']
-
-selected_materials = st.multiselect("Select Materials", 
-                                   options=list(materials_dict.keys()),
-                                   default=default_materials)
-if not selected_materials:
-    st.info("Please select at least one material.")
-    st.stop()
-
-# Initialize accumulators and containers.
-total_material_co2 = 0.0
-total_process_co2 = 0.0
-total_mass = 0.0
-total_weighted_recycled = 0.0
-eol_summary = {}
-comparison_data = []
-material_masses = {}
-processing_data = {}
-
-# Mapping for Circularity to numeric values.
-circularity_mapping = {"High": 3, "Medium": 2, "Low": 1, "Not Circular": 0}
-
-for material_name in selected_materials:
-    st.markdown(f'<div class="material-section">', unsafe_allow_html=True)
-    st.header(f"🔧 Material: {material_name}")
-    mat_props = materials_dict[material_name]
-    
-    # Input mass - check for loaded data
-    default_mass = 1.0
-    if (hasattr(st.session_state, 'loaded_version_data') and 
-        'material_masses' in st.session_state.loaded_version_data and
-        material_name in st.session_state.loaded_version_data['material_masses']):
-        default_mass = st.session_state.loaded_version_data['material_masses'][material_name]
-    
-    mass = st.number_input(f"Enter mass of {material_name} (kg)", 
-                          min_value=0.0, value=default_mass, key=f"mass_{material_name}")
-    material_masses[material_name] = mass
-    
-    total_mass += mass
-    material_co2 = mass * mat_props["CO₂e (kg)"]
-    total_material_co2 += material_co2
-    total_weighted_recycled += mass * mat_props["Recycled Content"]
-    
-    st.write(f"**CO₂e per kg:** {mat_props['CO₂e (kg)']} kg")
-    st.write(f"**Recycled Content:** {mat_props['Recycled Content']}%")
-    st.write(f"**Lifetime:** {mat_props['Lifetime']}")
-    st.write(f"**Circularity:** {mat_props['Circularity']}")
-    st.write(f"**Comment:** {mat_props['Comment']}")
-    st.write(f"**Alternative Material:** {mat_props['Alternative Material']}")
-    
-    # Save End-of-Life info.
-    eol_summary[material_name] = mat_props["EoL"]
-    
-    # Processing steps - check for loaded data
-    default_proc_steps = 0
-    if (hasattr(st.session_state, 'loaded_version_data') and 
-        'processing_data' in st.session_state.loaded_version_data and
-        material_name in st.session_state.loaded_version_data['processing_data']):
-        default_proc_steps = len(st.session_state.loaded_version_data['processing_data'][material_name])
-    
-    n_proc = int(st.number_input(f"How many processing steps for {material_name}?",
-                                min_value=0, max_value=10, value=default_proc_steps, 
-                                key=f"proc_steps_{material_name}"))
-    
-    proc_total = 0.0
-    processing_data[material_name] = []
-    
-    for i in range(n_proc):
-        # Check for loaded processing data
-        default_process = ""
-        default_amount = 1.0
-        if (hasattr(st.session_state, 'loaded_version_data') and 
-            'processing_data' in st.session_state.loaded_version_data and
-            material_name in st.session_state.loaded_version_data['processing_data'] and
-            i < len(st.session_state.loaded_version_data['processing_data'][material_name])):
-            loaded_proc = st.session_state.loaded_version_data['processing_data'][material_name][i]
-            default_process = loaded_proc.get('process', "")
-            default_amount = loaded_proc.get('amount', 1.0)
-        
-        proc_selected = st.selectbox(f"Process #{i+1} for {material_name}",
-                                   options=[""] + list(processes_dict.keys()),
-                                   index=0 if default_process == "" else (list(processes_dict.keys()).index(default_process) + 1 if default_process in processes_dict else 0),
-                                   key=f"process_{material_name}_{i}")
-        
-        if proc_selected:
-            process_props = processes_dict.get(proc_selected, {})
-            co2e_per_unit = process_props.get("CO₂e", 0)
-            unit = process_props.get("Unit", "Unknown")
-            amount_processed = st.number_input(f"Enter amount for '{proc_selected}' ({unit})",
-                                             min_value=0.0, value=default_amount,
-                                             key=f"amount_{material_name}_{i}")
-            proc_total += amount_processed * co2e_per_unit
-            
-            # Store processing data
-            processing_data[material_name].append({
-                'process': proc_selected,
-                'amount': amount_processed,
-                'co2e_per_unit': co2e_per_unit,
-                'unit': unit
-            })
-    
-    total_process_co2 += proc_total
-    
-    # Prepare data for comparison charts.
-    circ_value = circularity_mapping.get(mat_props["Circularity"].title(), 0)
-    lifetime_numeric = extract_number(mat_props["Lifetime"])
-    comparison_data.append({
-        "Material": material_name,
-        "CO2e per kg": mat_props["CO₂e (kg)"],
-        "Recycled Content (%)": mat_props["Recycled Content"],
-        "Circularity (mapped)": circ_value,
-        "Circularity (text)": mat_props["Circularity"],
-        "Lifetime (years)": lifetime_numeric,
-        "Lifetime (text)": mat_props["Lifetime"]
-    })
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# ------------------------------------------------------------------
-# FINAL SUMMARY 
-# ------------------------------------------------------------------
-overall_co2 = total_material_co2 + total_process_co2
-total_trees_equiv = overall_co2 / 22 
-trees_equiv = overall_co2 / (22 * lifetime_years) 
-weighted_recycled = (total_weighted_recycled / total_mass) if total_mass > 0 else 0
-
-final_summary_html = f"""
-<div class="summary-section">
-<h2>🌍 Final Summary</h2>
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0;">
-    <div class="metric-card">
-        <h3 style="color: #2E7D32; margin: 0;">♻️ Weighted Recycled Content  </h3>
-        <p style="font-size: 0.75rem; margin: 10px 0; color: #4CAF50;">{weighted_recycled:.1f}%</p>
-    </div>
-    <div class="metric-card">
-        <h3 style="color: #2E7D32; margin: 0;">🏭 Total CO₂ Impact (Materials) </h3>
-        <p style="font-size: 0.75rem; margin: 10px 0; color: #4CAF50;">{total_material_co2:.1f} kg</p>
-    </div>
-    <div class="metric-card">
-        <h3 style="color: #2E7D32; margin: 0;">🔧 Total CO₂ Impact (Processes) </h3>
-        <p style="font-size: 0.75rem; margin: 10px 0; color: #4CAF50;">{total_process_co2:.1f} kg</p>
-    </div>
-    <div class="metric-card">
-        <h3 style="color: #2E7D32; margin: 0;">🌍 Total Impact CO₂e per kg </h3>
-        <p style="font-size: 0.75rem; margin: 10px 0; color: #D32F2F;">{overall_co2:.1f} kg</p>
-    </div>
-    <div class="metric-card">
-        <h3 style="color: #2E7D32; margin: 0;">🌳 Tree Equivalent</h3>
-        <p style="font-size: 0.75rem; margin: 10px 0; color: #2E7D32;">{trees_equiv:.1f} trees/year over {lifetime_years} years </p>
-    </div>
-    <div class="metric-card">
-        <h3 style="color: #2E7D32; margin: 0;">Total Tree Equivalent 🌳</h3>
-        <p style="font-size: 0.75rem; margin: 10px 0; color: #2E7D32;">{total_trees_equiv:.1f} trees </p>
-    </div>
-</div>
-<h3 style="color: #388E3C; text-align: center; margin-top: 30px;">🔄 End-of-Life Summary</h3>
-<div style="background: rgba(255,255,255,0.7); padding: 20px; border-radius: 10px; margin-top: 15px;">
-<ul style="list-style-type: none; padding: 0;">
-"""
-for material, eol in eol_summary.items():
-    final_summary_html += f'<li style="padding: 8px; margin: 5px 0; background: rgba(76,175,80,0.1); border-radius: 5px; border-left: 4px solid #4CAF50;"><strong>{material}</strong>: {eol}</li>'
-final_summary_html += """
-</ul>
-</div>
-</div>
-"""
-
-st.markdown(final_summary_html, unsafe_allow_html=True)
-
-# Store assessment data for versioning
-st.session_state.current_assessment_data = {
-    'lifetime_weeks': lifetime_weeks,
-    'selected_materials': selected_materials,
-    'material_masses': material_masses,
-    'processing_data': processing_data,
-    'total_material_co2': total_material_co2,
-    'total_process_co2': total_process_co2,
-    'overall_co2': overall_co2,
-    'weighted_recycled': weighted_recycled,
-    'trees_equiv': trees_equiv,
-    'eol_summary': eol_summary,
-    'final_summary_html': final_summary_html,
-    'comparison_data': comparison_data
+DEMO_USERS = {
+    "edwin": {"password": "test123", "full_name": "Edwin Sahyoun"},
+    "demo": {"password": "demo", "full_name": "Demo User"},
 }
 
-# Store final summary in session state for versioning.
-st.session_state.final_summary_html = final_summary_html
 
-# ------------------------------------------------------------------
-# VISUALIZATION: SEPARATE BAR CHARTS FOR EACH ATTRIBUTE
-# ------------------------------------------------------------------
-st.markdown("## 📊 Comparison Visualizations")
+def login_panel() -> Optional[User]:
+    with st.sidebar:
+        st.header("🔐 Sign in")
+        username = st.text_input("Username", key="login_user")
+        password = st.text_input("Password", type="password", key="login_pass")
+        colA, colB = st.columns([1,1])
+        login_clicked = colA.button("Sign in", use_container_width=True)
+        theme_choice = colB.selectbox("Theme", ["clean", "dark"], index=(1 if st.session_state.theme=="dark" else 0))
+        if theme_choice != st.session_state.theme:
+            st.session_state.theme = theme_choice
+            st.experimental_set_query_params(theme=theme_choice)
+            st.rerun()
 
-df_compare = pd.DataFrame(comparison_data)
-my_color_sequence = ['#2E7D32', '#388E3C', '#4CAF50', '#66BB6A', '#81C784']
+        if login_clicked:
+            rec = DEMO_USERS.get(username)
+            if rec and rec["password"] == password:
+                st.session_state.user = User(username=username, full_name=rec["full_name"])  # type: ignore
+                st.success(f"Welcome {rec['full_name']}!")
+                st.rerun()
+            else:
+                st.error("Invalid credentials. Try demo/demo.")
 
-# Create chart containers
-col1, col2 = st.columns(2)
+    return st.session_state.get("user")
 
-with col1:
-    st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-    # CO₂e per kg Comparison Chart.
-    fig_co2 = px.bar(
-        df_compare, x="Material", y="CO2e per kg",
-        color="Material", title="🏭 CO₂e per kg Comparison",
-        color_discrete_sequence=my_color_sequence
+
+# ----------------------------
+# Data model & computations
+# ----------------------------
+@dataclass
+class Activity:
+    name: str
+    quantity: float
+    unit: str
+    emission_factor: float  # kg CO2e per unit
+
+    @property
+    def emissions(self) -> float:
+        return self.quantity * self.emission_factor
+
+
+def default_catalog() -> pd.DataFrame:
+    data = [
+        {"name": "Electricity (grid)", "unit": "kWh", "emission_factor": 0.42},
+        {"name": "Diesel", "unit": "L", "emission_factor": 2.68},
+        {"name": "Steel", "unit": "kg", "emission_factor": 1.9},
+        {"name": "Concrete", "unit": "kg", "emission_factor": 0.12},
+        {"name": "Transport (truck)", "unit": "ton-km", "emission_factor": 0.12},
+    ]
+    return pd.DataFrame(data)
+
+
+def activities_from_df(df: pd.DataFrame) -> List[Activity]:
+    rows = []
+    for _, r in df.iterrows():
+        try:
+            rows.append(Activity(name=str(r["name"]).strip(),
+                                 quantity=float(r["quantity"]),
+                                 unit=str(r["unit"]).strip(),
+                                 emission_factor=float(r["emission_factor"])) )
+        except Exception:
+            continue
+    return rows
+
+
+def compute_summary(acts: List[Activity]) -> pd.DataFrame:
+    if not acts:
+        return pd.DataFrame(columns=["Activity", "Quantity", "Unit", "EF (kg CO2e/unit)", "Emissions (kg CO2e)"])
+    recs = [{"Activity": a.name,
+             "Quantity": a.quantity,
+             "Unit": a.unit,
+             "EF (kg CO2e/unit)": a.emission_factor,
+             "Emissions (kg CO2e)": a.emissions} for a in acts]
+    df = pd.DataFrame(recs)
+    df.loc["Total"] = ["—", "—", "—", "—", df["Emissions (kg CO2e)"].sum()]
+    return df
+
+
+def breakdown_by_category(acts: List[Activity]) -> pd.DataFrame:
+    # naive category mapping from names
+    def cat(name: str) -> str:
+        n = name.lower()
+        if any(k in n for k in ["electric", "grid"]):
+            return "Electricity"
+        if any(k in n for k in ["diesel", "fuel"]):
+            return "Fuel"
+        if any(k in n for k in ["steel", "concrete", "material"]):
+            return "Materials"
+        if any(k in n for k in ["transport", "truck", "ship"]):
+            return "Transport"
+        return "Other"
+    return pd.DataFrame(
+        {"Category": [cat(a.name) for a in acts],
+         "Emissions": [a.emissions for a in acts]}
+    ).groupby("Category", as_index=False).sum().sort_values("Emissions", ascending=False)
+
+
+# ----------------------------
+# Visualization helpers
+# ----------------------------
+
+def plot_category_bar(breakdown: pd.DataFrame):
+    fig = go.Figure(data=[go.Bar(x=breakdown["Category"], y=breakdown["Emissions"], text=breakdown["Emissions"].round(1), textposition='auto')])
+    fig.update_layout(height=380, margin=dict(l=10,r=10,t=30,b=10), title="Emissions by Category (kg CO2e)")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def plot_pareto(breakdown: pd.DataFrame):
+    if breakdown.empty:
+        return
+    df = breakdown.copy().sort_values("Emissions", ascending=False)
+    df["cum_share"] = df["Emissions"].cumsum() / df["Emissions"].sum()
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=df["Category"], y=df["Emissions"], name="Emissions"))
+    fig.add_trace(go.Scatter(x=df["Category"], y=(df["cum_share"]*100).round(1), yaxis="y2", name="Cumulative %"))
+    fig.update_layout(
+        height=380,
+        margin=dict(l=10,r=10,t=30,b=10),
+        title="Pareto of Categories",
+        yaxis=dict(title="kg CO2e"),
+        yaxis2=dict(title="%", overlaying='y', side='right', range=[0,100])
     )
-    fig_co2.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#2E7D32'),
-        title_font_size=18,
-        title_x=0.5
-    )
-    st.plotly_chart(fig_co2, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.plotly_chart(fig, use_container_width=True)
 
-with col2:
-    st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-    # Recycled Content (%) Comparison Chart.
-    fig_recycled = px.bar(
-        df_compare, x="Material", y="Recycled Content (%)",
-        color="Material", title="♻️ Recycled Content Comparison",
-        color_discrete_sequence=my_color_sequence
-    )
-    fig_recycled.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#2E7D32'),
-        title_font_size=18,
-        title_x=0.5
-    )
-    st.plotly_chart(fig_recycled, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
 
-col3, col4 = st.columns(2)
+def plot_sankey(acts: List[Activity]):
+    if not acts:
+        return
+    # Build a simple source->category->total Sankey
+    cats = {}
+    def get_cat(a: Activity):
+        n = a.name.lower()
+        if any(k in n for k in ["electric", "grid"]): return "Electricity"
+        if any(k in n for k in ["diesel", "fuel"]): return "Fuel"
+        if any(k in n for k in ["steel", "concrete", "material"]): return "Materials"
+        if any(k in n for k in ["transport", "truck", "ship"]): return "Transport"
+        return "Other"
+    categories = sorted(set(get_cat(a) for a in acts))
+    sources = [a.name for a in acts]
+    labels = sources + categories + ["Total"]
+    idx = {lab:i for i,lab in enumerate(labels)}
 
-with col3:
-    st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-    # Circularity Comparison Chart.
-    fig_circularity = px.bar(
-        df_compare, x="Material", y="Circularity (mapped)",
-        color="Material", title="🔄 Circularity Comparison",
-        color_discrete_sequence=my_color_sequence
-    )
-    fig_circularity.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#2E7D32'),
-        title_font_size=18,
-        title_x=0.5,
-        yaxis=dict(
-            tickmode='array',
-            tickvals=[0, 1, 2, 3],
-            ticktext=['Not Circular', 'Low', 'Medium', 'High']
-        )
-    )
-    st.plotly_chart(fig_circularity, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    # links: source -> category, category -> Total
+    src, tgt, val = [], [], []
+    cat_totals = {c:0.0 for c in categories}
+    for a in acts:
+        c = get_cat(a)
+        src.append(idx[a.name]); tgt.append(idx[c]); val.append(a.emissions)
+        cat_totals[c]+=a.emissions
+    for c, v in cat_totals.items():
+        src.append(idx[c]); tgt.append(idx["Total"]); val.append(v)
 
-with col4:
-    st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-    # Lifetime Comparison Chart.
-    df_compare["Lifetime Category"] = df_compare["Lifetime (years)"].apply(lifetime_category)
-    lifetime_cat_to_num = {"Short": 1, "Medium": 2, "Long": 3}
-    df_compare["Lifetime"] = df_compare["Lifetime Category"].map(lifetime_cat_to_num)
-    fig_lifetime = px.bar(
-        df_compare,
-        x="Material",
-        y="Lifetime",
-        color="Material",
-        title="⏱️ Lifetime Comparison",
-        color_discrete_sequence=my_color_sequence
-    )
-    fig_lifetime.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#2E7D32'),
-        title_font_size=18,
-        title_x=0.5,
-        yaxis=dict(
-            tickmode='array',
-            tickvals=[1, 2, 3],
-            ticktext=["Short", "Medium", "Long"]
-        )
-    )
-    st.plotly_chart(fig_lifetime, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    fig = go.Figure(data=[go.Sankey(
+        node=dict(label=labels, pad=15, thickness=18),
+        link=dict(source=src, target=tgt, value=val)
+    )])
+    fig.update_layout(height=500, margin=dict(l=10,r=10,t=30,b=10), title="Flow of Emissions")
+    st.plotly_chart(fig, use_container_width=True)
 
-# ------------------------------------------------------------------
-# CLEAR LOADED DATA (to prevent interference with new assessments)
-# ------------------------------------------------------------------
-if hasattr(st.session_state, 'loaded_version_data'):
-    del st.session_state.loaded_version_data
+
+# ----------------------------
+# Report generation (HTML + CSV)
+# ----------------------------
+
+def generate_html_report(project_name: str, df_summary: pd.DataFrame, df_breakdown: pd.DataFrame, notes: str) -> bytes:
+    total = 0.0
+    if not df_summary.empty and "Emissions (kg CO2e)" in df_summary.columns and "Total" in df_summary.index:
+        total = float(df_summary.loc["Total", "Emissions (kg CO2e)"])
+    html = f"""
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'/>
+<title>LCA Report - {project_name}</title>
+<style>
+body {{ font-family: Arial, sans-serif; margin: 2rem; }}
+h1 {{ color: #0ea5e9; }}
+.table {{ border-collapse: collapse; width: 100%; margin: 1rem 0; }}
+.table th, .table td {{ border: 1px solid #e5e7eb; padding: 8px; text-align: left; }}
+.badge {{ display: inline-block; background: #e0f2fe; color: #0369a1; padding: 6px 10px; border-radius: 999px; font-weight: 700; }}
+.note {{ background: #f8fafc; padding: 12px; border-radius: 12px; }}
+</style>
+</head>
+<body>
+  <h1>Life Cycle Assessment Report</h1>
+  <p><strong>Project:</strong> {project_name}</p>
+  <p><span class='badge'>Total Emissions: {total:.2f} kg CO2e</span></p>
+  <h2>Activity Summary</h2>
+  {df_summary.to_html(classes='table', border=0)}
+  <h2>Breakdown by Category</h2>
+  {df_breakdown.to_html(classes='table', border=0, index=False)}
+  <h2>Notes</h2>
+  <div class='note'>{notes if notes else '—'}</div>
+</body>
+</html>
+"""
+    return html.encode("utf-8")
+
+
+# ----------------------------
+# App UI
+# ----------------------------
+
+def app():
+    user = login_panel()
+    st.title("♻️ LCA Tool")
+    if not user:
+        st.info("Use demo/demo to sign in. Once signed in, you can enter data, visualize, and export a report.")
+        st.stop()
+
+    # Sidebar: Project info + upload
+    with st.sidebar:
+        st.subheader("Project")
+        project_name = st.text_input("Project name", value="Sample Project")
+        st.subheader("Data Catalog")
+        catalog_df = default_catalog()
+        with st.expander("View default emission factors"):
+            st.dataframe(catalog_df, use_container_width=True)
+        uploaded = st.file_uploader("Upload activities CSV (name,quantity,unit,emission_factor)", type=["csv"])    
+
+    st.write("")
+    tab_input, tab_results, tab_report, tab_settings = st.tabs(["Data Entry", "Results & Visuals", "Report", "Settings"])
+
+    # --------------------
+    # Data Entry tab
+    # --------------------
+    with tab_input:
+        st.subheader("Enter Activities")
+        acts: List[Activity] = []
+        col1, col2 = st.columns([2,1])
+        with col1:
+            with st.form("manual_input"):
+                st.caption("Quick add from catalog")
+                selected = st.selectbox("Activity", options=["(custom)"] + catalog_df["name"].tolist())
+                if selected != "(custom)":
+                    row = catalog_df[catalog_df["name"]==selected].iloc[0]
+                    name = selected
+                    unit = row["unit"]
+                    ef = float(row["emission_factor"])
+                else:
+                    name = st.text_input("Name", value="Electricity (grid)")
+                    unit = st.text_input("Unit", value="kWh")
+                    ef = st.number_input("Emission factor (kg CO2e / unit)", min_value=0.0, step=0.01, value=0.42)
+                qty = st.number_input("Quantity", min_value=0.0, step=0.1, value=100.0)
+                add_btn = st.form_submit_button("Add activity")
+                if add_btn:
+                    stash = st.session_state.setdefault("activities", [])
+                    stash.append({"name": name, "quantity": qty, "unit": unit, "emission_factor": ef})
+                    st.success(f"Added {name}")
+        with col2:
+            st.caption("Manage")
+            if st.button("Clear activities", type="secondary"):
+                st.session_state["activities"] = []
+                st.warning("Cleared.")
+            st.write("\n")
+            if uploaded is not None:
+                try:
+                    df_up = pd.read_csv(uploaded)
+                    st.session_state["activities"] = df_up.to_dict(orient="records")
+                    st.success("Loaded from CSV")
+                except Exception as e:
+                    st.error(f"Failed to read CSV: {e}")
+
+        st.write("\n")
+        st.subheader("Current Activities")
+        data_recs = st.session_state.get("activities", [])
+        df_current = pd.DataFrame(data_recs)
+        if not df_current.empty:
+            st.dataframe(df_current, use_container_width=True, hide_index=True)
+        else:
+            st.info("No activities yet. Add one above or upload a CSV.")
+
+    # --------------------
+    # Results tab
+    # --------------------
+    with tab_results:
+        st.subheader("Results & Visuals")
+        acts = activities_from_df(pd.DataFrame(st.session_state.get("activities", [])))
+        df_summary = compute_summary(acts)
+        df_breakdown = breakdown_by_category(acts) if acts else pd.DataFrame(columns=["Category","Emissions"])
+
+        c1, c2, c3 = st.columns(3)
+        total = float(df_summary.loc["Total", "Emissions (kg CO2e)"]) if "Total" in df_summary.index else 0.0
+        c1.metric("Total emissions", f"{total:,.2f}", help="kg CO2e")
+        c2.metric("# of activities", f"{len(acts)}")
+        c3.metric("Categories", f"{df_breakdown['Category'].nunique() if not df_breakdown.empty else 0}")
+
+        left, right = st.columns([1.1, 1])
+        with left:
+            plot_category_bar(df_breakdown)
+            plot_pareto(df_breakdown)
+        with right:
+            plot_sankey(acts)
+
+        st.markdown("### Detailed Summary")
+        st.dataframe(df_summary, use_container_width=True)
+
+    # --------------------
+    # Report tab
+    # --------------------
+    with tab_report:
+        st.subheader("Generate Report")
+        notes = st.text_area("Executive notes (optional)")
+        acts = activities_from_df(pd.DataFrame(st.session_state.get("activities", [])))
+        df_summary = compute_summary(acts)
+        df_breakdown = breakdown_by_category(acts) if acts else pd.DataFrame(columns=["Category","Emissions"])
+
+        # HTML report
+        html_bytes = generate_html_report(project_name, df_summary, df_breakdown, notes)
+        st.download_button("⬇️ Download HTML report", data=html_bytes, file_name=f"LCA_Report_{project_name.replace(' ','_')}.html", mime="text/html")
+
+        # CSV export
+        if not df_summary.empty:
+            csv = df_summary.to_csv(index=True).encode("utf-8")
+            st.download_button("⬇️ Download CSV (summary)", data=csv, file_name=f"LCA_Summary_{project_name.replace(' ','_')}.csv", mime="text/csv")
+        else:
+            st.caption("(Add activities to enable exports)")
+
+    # --------------------
+    # Settings tab (placeholders for future features)
+    # --------------------
+    with tab_settings:
+        st.subheader("Settings & Admin")
+        st.toggle("Enable advanced charts (beta)")
+        st.toggle("Show debug info")
+        st.caption("Future ideas: versioned projects, multi-user teams, emission factor libraries, API integrations, real sign-in.")
+
+
+if __name__ == "__main__":
+    app()
