@@ -670,8 +670,75 @@ if page == "Workspace":
                 self.meta.write_text(json.dumps(m, indent=2))
             def save(self, name, data, desc=""):
                 m = self._load()
-                if not name: return False, "Enter a name."
-                if name in m: return False, "Name exists."
+                if not name:
+                    return False, "Enter a name."
+                if name in m:
+                    return False, "Name exists."
                 fp = self.dir / f"{name}.json"
-                fp.write_text(json.dumps({"assessment_data": data, "timestamp": datetime.now().isoformat(), "description": desc}))
-                m[name] = {"filename": fp.name, "description": desc, "
+                payload = {"assessment_data": data, "timestamp": datetime.now().isoformat(), "description": desc}
+                fp.write_text(json.dumps(payload))
+                m[name] = {
+                    "filename": fp.name,
+                    "description": desc,
+                    "created_at": datetime.now().isoformat(),
+                    "materials_count": len(data.get('selected_materials', [])),
+                    "total_co2": data.get('overall_co2', 0)
+                }
+                self._save(m)
+                return True, "Saved."
+            def list(self):
+                return self._load()
+            def load(self, name):
+                m = self._load()
+                if name not in m:
+                    return None, "Not found."
+                fp = self.dir / m[name]["filename"]
+                if not fp.exists():
+                    return None, "File missing."
+                try:
+                    payload = json.loads(fp.read_text())
+                    return payload.get("assessment_data", {}), "Loaded."
+                except Exception as e:
+                    return None, f"Read error: {e}"
+            def delete(self, name):
+                m = self._load()
+                if name not in m:
+                    return False, "Not found."
+                fp = self.dir / m[name]["filename"]
+                if fp.exists():
+                    fp.unlink()
+                del m[name]
+                self._save(m)
+                return True, "Deleted."
+
+        if "vm" not in st.session_state: st.session_state.vm = VM()
+        vm = st.session_state.vm
+
+        t1, t2, t3 = st.tabs(["Save", "Load", "Manage"])
+        with t1:
+            name = st.text_input("Version name")
+            desc = st.text_area("Description (optional)")
+            if st.button("💾 Save"):
+                data = {**st.session_state.assessment}
+                data.update(compute_results())
+                ok, msg = vm.save(name, data, desc)
+                st.success(msg) if ok else st.error(msg)
+
+        with t2:
+            meta = vm.list()
+            if not meta:
+                st.info("No versions saved yet.")
+            else:
+                sel = st.selectbox("Select version", list(meta.keys()))
+                if st.button("📂 Load"):
+                    data, msg = vm.load(sel)
+                    if data:
+                        st.session_state.assessment = data
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+
+        with t3:
+            meta = vm.list()
+            if not meta:
+                st.info("Nothing to
