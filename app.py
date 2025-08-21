@@ -8,7 +8,17 @@ from pathlib import Path
 from typing import Optional
 
 # =============================================================
-# TCHAI — Easy LCA Indicator (full app)
+# TCHAI — Easy LCA Indicator (full app, robust Inputs)
+# - Front-page Sign-in (no self-signup) with 3 pre-created users:
+#   sustainability@tchai.nl / ChangeMe123!
+#   jillderegt@tchai.nl     / ChangeMe123!
+#   veravanbeaumont@tchai.nl/ ChangeMe123!
+# - Avatar menu: change password + sign out
+# - Sidebar: only the TCHAI logo + navigation (Inputs, Workspace, Settings)
+# - Inputs: robust sheet detection, tolerant column parsing, preview, session override upload
+# - Workspace tabs: Results, Comparison (purple), Final Summary, Report (HTML), Versions (save/load/delete)
+# - Settings: Database Manager (upload .xlsx, list, activate)
+# - B&W UI, purple charts; safe folder creation; st.rerun compatibility
 # =============================================================
 
 st.set_page_config(
@@ -43,7 +53,7 @@ ACTIVE_DB_FILE = DB_ROOT / "active.json"  # stores {"path": "<active .xlsx>"}
 def _rerun():
     if hasattr(st, "rerun"):
         st.rerun()
-    else:
+    else:  # pragma: no cover
         try:
             st.experimental_rerun()
         except Exception:
@@ -220,10 +230,10 @@ if not st.session_state.auth_user:
 # =============================
 
 # -----------------------------
-# Database management (load/activate/list)
+# Database management (robust)
 # -----------------------------
 def list_databases():
-    return sorted(DB_ROOT.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return sorted((ASSETS / "databases").glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
 
 def set_active_database(path: Path):
     ACTIVE_DB_FILE.write_text(json.dumps({"path": str(path)}))
@@ -231,6 +241,7 @@ def set_active_database(path: Path):
     _rerun()
 
 def get_active_database_path() -> Optional[Path]:
+    # 1) explicit active.json
     if ACTIVE_DB_FILE.exists():
         try:
             data = json.loads(ACTIVE_DB_FILE.read_text())
@@ -239,8 +250,14 @@ def get_active_database_path() -> Optional[Path]:
                 return p
         except Exception:
             pass
-    # Fallbacks
-    for candidate in [ASSETS / "Refined database.xlsx", Path("Refined database.xlsx"), Path("database.xlsx")]:
+    # 2) newest uploaded in assets/databases/
+    dbs = list_databases()
+    if dbs:
+        return dbs[0]
+    # 3) bundled fallbacks
+    for candidate in [ASSETS / "Refined database.xlsx",
+                      Path("Refined database.xlsx"),
+                      Path("database.xlsx")]:
         if candidate.exists():
             return candidate
     return None
@@ -248,7 +265,11 @@ def get_active_database_path() -> Optional[Path]:
 def load_active_excel() -> Optional[pd.ExcelFile]:
     p = get_active_database_path()
     if p and p.exists():
-        return pd.ExcelFile(str(p))
+        try:
+            return pd.ExcelFile(str(p))
+        except Exception as e:
+            st.error(f"Failed to open Excel: {p.name} — {e}")
+            return None
     return None
 
 # -----------------------------
@@ -269,13 +290,16 @@ def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
 
 def _find_sheet(xls: pd.ExcelFile, target: str) -> Optional[str]:
     names = xls.sheet_names
+    # exact
     for n in names:
         if n == target:
             return n
+    # trimmed / case-insensitive
     t = re.sub(r"\s+", "", target.lower())
     for n in names:
         if re.sub(r"\s+", "", n.lower()) == t:
             return n
+    # partial
     for n in names:
         if target.lower() in n.lower():
             return n
@@ -284,28 +308,27 @@ def _find_sheet(xls: pd.ExcelFile, target: str) -> Optional[str]:
 def parse_materials(df_raw: pd.DataFrame) -> dict:
     if df_raw is None or df_raw.empty:
         return {}
-
     df = _normalize_cols(df_raw)
-    def pick(df, aliases):
+
+    def pick(aliases):
         for a in aliases:
             if a in df.columns:
                 return a
         return None
 
-    col_name  = pick(df, ["material name", "material", "name"])
-    col_co2   = pick(df, ["co2e (kg)", "co2e/kg", "co2e", "co2e per kg", "co2 (kg)", "emission factor"])
-    col_rc    = pick(df, ["recycled content", "recycled content (%)", "recycled", "recycled %"])
-    col_eol   = pick(df, ["eol", "end of life"])
-    col_life  = pick(df, ["lifetime", "life", "lifespan", "lifetime (years)"])
-    col_circ  = pick(df, ["circularity", "circ"])
+    col_name = pick(["material name","material","name"])
+    col_co2  = pick(["co2e (kg)","co2e/kg","co2e","co2e per kg","co2 (kg)","emission factor"])
+    col_rc   = pick(["recycled content","recycled content (%)","recycled","recycled %"])
+    col_eol  = pick(["eol","end of life"])
+    col_life = pick(["lifetime","life","lifespan","lifetime (years)"])
+    col_circ = pick(["circularity","circ"])
 
-    required = [col_name, col_co2]
-    if any(c is None for c in required):
+    if not col_name or not col_co2:
         return {}
 
     out = {}
     for _, r in df.iterrows():
-        name = str(r[col_name]).strip() if pd.notna(r[col_name]) else ""
+        name = (str(r[col_name]).strip() if pd.notna(r[col_name]) else "")
         if not name:
             continue
         out[name] = {
@@ -320,24 +343,24 @@ def parse_materials(df_raw: pd.DataFrame) -> dict:
 def parse_processes(df_raw: pd.DataFrame) -> dict:
     if df_raw is None or df_raw.empty:
         return {}
-
     df = _normalize_cols(df_raw)
-    def pick(df, aliases):
+
+    def pick(aliases):
         for a in aliases:
             if a in df.columns:
                 return a
         return None
 
-    col_proc = pick(df, ["process", "step", "operation"])
-    col_co2  = pick(df, ["co2e", "co2e (kg)", "co2", "emission", "factor"])
-    col_unit = pick(df, ["unit", "uom"])
+    col_proc = pick(["process","step","operation"])
+    col_co2  = pick(["co2e","co2e (kg)","co2","emission","factor"])
+    col_unit = pick(["unit","uom"])
 
     if not col_proc or not col_co2:
         return {}
 
     out = {}
     for _, r in df.iterrows():
-        name = str(r[col_proc]).strip() if pd.notna(r[col_proc]) else ""
+        name = (str(r[col_proc]).strip() if pd.notna(r[col_proc]) else "")
         if not name:
             continue
         out[name] = {
@@ -360,50 +383,74 @@ if "assessment" not in st.session_state:
     }
 
 # -----------------------------
-# Inputs (with sheet/status panel)
+# Inputs (status + tolerant parsing + override uploader)
 # -----------------------------
 if page == "Inputs":
-    xls = load_active_excel()
+    # Show current active DB + optional session override
+    active_path = get_active_database_path()
+    st.subheader("Database status")
+    c0, c1 = st.columns([0.6, 0.4])
+    with c0:
+        if active_path:
+            st.success(f"Active database: **{active_path.name}**")
+        else:
+            st.error("No active database found.")
+    with c1:
+        st.caption("Quick override (optional)")
+        override = st.file_uploader("Use a different Excel for this session", type=["xlsx"], key="override_db")
+
+    # Decide which Excel to load
+    if override is not None:
+        try:
+            xls = pd.ExcelFile(override)
+            st.info("Using the uploaded override Excel for this session.")
+        except Exception as e:
+            st.error(f"Could not open the uploaded Excel: {e}")
+            st.stop()
+    else:
+        xls = load_active_excel()
+
     if not xls:
-        st.error("No active database. Go to Settings → Database Manager and upload/activate one.")
+        st.error("No Excel could be opened. Go to Settings → Database Manager and upload/activate one, or use the override above.")
         st.stop()
 
+    # Sheet detection + manual choice
     auto_mat = _find_sheet(xls, "Materials")
     auto_proc = _find_sheet(xls, "Processes")
 
-    st.subheader("Database status")
-    cols = st.columns(2)
-    with cols[0]:
-        st.caption("Detected sheets")
-        st.write(f"Materials sheet: **{auto_mat or 'not found'}**")
-        st.write(f"Processes sheet: **{auto_proc or 'not found'}**")
-        mat_choice = st.selectbox("Choose Materials sheet", options=xls.sheet_names,
+    c2, c3 = st.columns(2)
+    with c2:
+        st.caption("Sheets in workbook")
+        st.write(", ".join(xls.sheet_names))
+        mat_choice = st.selectbox("Materials sheet", options=xls.sheet_names,
                                   index=(xls.sheet_names.index(auto_mat) if auto_mat in xls.sheet_names else 0))
-        proc_choice = st.selectbox("Choose Processes sheet", options=xls.sheet_names,
+        proc_choice = st.selectbox("Processes sheet", options=xls.sheet_names,
                                    index=(xls.sheet_names.index(auto_proc) if auto_proc in xls.sheet_names else 0))
-    with cols[1]:
-        st.caption("Preview (first 5 rows of Materials)")
+    with c3:
+        st.caption(f"Preview of '{mat_choice}' (first 5 rows)")
         try:
-            st.dataframe(pd.read_excel(xls, sheet_name=mat_choice).head(5))
+            st.dataframe(pd.read_excel(xls, sheet_name=mat_choice).head(5), use_container_width=True)
         except Exception as e:
-            st.warning(f"Could not preview Materials: {e}")
+            st.warning(f"Preview error: {e}")
 
+    # Parse selected sheets
     try:
         mats_df = pd.read_excel(xls, sheet_name=mat_choice)
         procs_df = pd.read_excel(xls, sheet_name=proc_choice)
         st.session_state.materials = parse_materials(mats_df)
         st.session_state.processes = parse_processes(procs_df)
     except Exception as e:
-        st.error(f"Could not read selected sheets: {e}")
+        st.error(f"Could not read the selected sheets: {e}")
         st.stop()
 
     parsed_count = len(st.session_state.materials or {})
     st.info(f"Parsed **{parsed_count}** materials from '{mat_choice}'.")
     if parsed_count == 0:
-        st.warning("No materials were parsed. Check column names in your Excel. "
-                   "The app accepts flexible aliases: Material name, CO2e (kg), Recycled Content, EoL, Lifetime, Circularity.")
+        st.warning("No materials parsed. Please check your column names. "
+                   "Accepted aliases include: Material name/material/name, CO2e (kg)/CO2e, Recycled Content, EoL, Lifetime, Circularity.")
         st.stop()
 
+    # Lifetime + Materials UI
     st.subheader("Lifetime (weeks)")
     st.session_state.assessment["lifetime_weeks"] = st.number_input(
         "", min_value=1, value=int(st.session_state.assessment.get("lifetime_weeks", 52))
@@ -505,3 +552,126 @@ def compute_results():
         'lifetime_years': years,
         'eol_summary': eol,
         'comparison': cmp_rows
+    }
+
+# -----------------------------
+# Workspace (tabs)
+# -----------------------------
+if page == "Workspace":
+    if not st.session_state.assessment.get('selected_materials'):
+        st.info("Go to Inputs and add at least one material.")
+        st.stop()
+
+    R = compute_results()
+    tabs = st.tabs(["Results", "Comparison", "Final Summary", "Report", "Versions"])
+
+    # Results
+    with tabs[0]:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total CO₂ (materials)", f"{R['total_material_co2']:.1f} kg")
+        c2.metric("Total CO₂ (processes)", f"{R['total_process_co2']:.1f} kg")
+        c3.metric("Weighted recycled", f"{R['weighted_recycled']:.1f}%")
+
+    # Comparison (purple charts)
+    with tabs[1]:
+        df = pd.DataFrame(R['comparison'])
+        if df.empty:
+            st.info("No data yet.")
+        else:
+            def style(fig):
+                fig.update_layout(plot_bgcolor="#fff", paper_bgcolor="#fff",
+                                  font=dict(color="#000", size=14),
+                                  title_x=0.5, title_font_size=20)
+                return fig
+            c1, c2 = st.columns(2)
+            with c1:
+                fig = px.bar(df, x="Material", y="CO2e per kg", color="Material",
+                             title="CO₂e per kg", color_discrete_sequence=PURPLE)
+                st.plotly_chart(style(fig), use_container_width=True)
+            with c2:
+                fig = px.bar(df, x="Material", y="Recycled Content (%)", color="Material",
+                             title="Recycled Content (%)", color_discrete_sequence=PURPLE)
+                st.plotly_chart(style(fig), use_container_width=True)
+            c3, c4 = st.columns(2)
+            with c3:
+                fig = px.bar(df, x="Material", y="Circularity (mapped)", color="Material",
+                             title="Circularity", color_discrete_sequence=PURPLE)
+                fig.update_yaxes(tickmode='array', tickvals=[0,1,2,3],
+                                 ticktext=['Not Circular','Low','Medium','High'])
+                st.plotly_chart(style(fig), use_container_width=True)
+            with c4:
+                d = df.copy()
+                def life_cat(x):
+                    v = extract_number(x)
+                    return 'Short' if v < 5 else ('Medium' if v <= 15 else 'Long')
+                d['Lifetime Category'] = d['Lifetime (years)'].apply(life_cat)
+                MAP = {"Short":1, "Medium":2, "Long":3}
+                d['Lifetime'] = d['Lifetime Category'].map(MAP)
+                fig = px.bar(d, x="Material", y="Lifetime", color="Material",
+                             title="Lifetime", color_discrete_sequence=PURPLE)
+                fig.update_yaxes(tickmode='array', tickvals=[1,2,3],
+                                 ticktext=['Short','Medium','Long'])
+                st.plotly_chart(style(fig), use_container_width=True)
+
+    # Final Summary
+    with tabs[2]:
+        m1, m2, m3 = st.columns(3)
+        m1.markdown(f"<div class='metric'><div>Total Impact CO₂e</div><h2>{R['overall_co2']:.1f} kg</h2></div>", unsafe_allow_html=True)
+        m2.markdown(f"<div class='metric'><div>Tree Equivalent / year</div><h2>{R['trees_equiv']:.1f}</h2></div>", unsafe_allow_html=True)
+        m3.markdown(f"<div class='metric'><div>Total Trees</div><h2>{R['total_trees_equiv']:.1f}</h2></div>", unsafe_allow_html=True)
+        st.markdown("#### End‑of‑Life Summary")
+        for k, v in R['eol_summary'].items():
+            st.write(f"• **{k}** — {v}")
+
+    # Report (HTML only)
+    with tabs[3]:
+        project = st.text_input("Project name", value="Sample Project")
+        notes = st.text_area("Executive notes")
+        big_logo = logo_tag(100)
+        html = f"""
+        <!doctype html><html><head><meta charset='utf-8'><title>{project} — TCHAI Report</title>
+        <style>
+          body{{font-family:Arial,sans-serif;margin:24px}}
+          header{{display:flex;align-items:center;gap:16px;margin-bottom:10px}}
+          th,td{{border:1px solid #eee;padding:6px 8px}}
+          table{{border-collapse:collapse;width:100%}}
+        </style></head>
+        <body>
+          <header>{big_logo}</header>
+          <h2 style='text-align:center'>Summary</h2>
+          <ul>
+            <li>Total CO₂e: {R['overall_co2']:.2f} kg</li>
+            <li>Weighted recycled: {R['weighted_recycled']:.1f}%</li>
+            <li>Materials: {R['total_material_co2']:.1f} kg · Processes: {R['total_process_co2']:.1f} kg</li>
+            <li>Trees/year: {R['trees_equiv']:.1f} · Total trees: {R['total_trees_equiv']:.1f}</li>
+          </ul>
+          <h3>End‑of‑Life</h3>
+          <ul>{''.join([f"<li><b>{k}</b> — {v}</li>" for k,v in R['eol_summary'].items()])}</ul>
+          <h3>Notes</h3><div>{notes or '—'}</div>
+        </body></html>
+        """
+        st.download_button(
+            "⬇️ Download HTML report",
+            data=html.encode(),
+            file_name=f"TCHAI_Report_{project.replace(' ','_')}.html",
+            mime="text/html"
+        )
+        st.caption("If you prefer PDF only later, we can add server-side HTML→PDF.")
+
+    # Versions
+    with tabs[4]:
+        class VM:
+            def __init__(self, storage_dir: str = "lca_versions"):
+                self.dir = Path(storage_dir); self.dir.mkdir(exist_ok=True)
+                self.meta = self.dir / "lca_versions_metadata.json"
+            def _load(self): 
+                return json.loads(self.meta.read_text()) if self.meta.exists() else {}
+            def _save(self, m): 
+                self.meta.write_text(json.dumps(m, indent=2))
+            def save(self, name, data, desc=""):
+                m = self._load()
+                if not name: return False, "Enter a name."
+                if name in m: return False, "Name exists."
+                fp = self.dir / f"{name}.json"
+                fp.write_text(json.dumps({"assessment_data": data, "timestamp": datetime.now().isoformat(), "description": desc}))
+                m[name] = {"filename": fp.name, "description": desc, "
