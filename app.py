@@ -268,7 +268,7 @@ if page=="Workspace":
             def list(s): return s._load()
             def delete(s,name): m=s._load(); fp=s.dir/m[name]["file"]; 
             def delete(s,name): m=s._load(); fp=s.dir/m[name]["file"]; 
-            if fp.exists(): fp.unlink(); del m[name]; s._save(m); return True,"Deleted"
+                if fp.exists(): fp.unlink(); del m[name]; s._save(m); return True,"Deleted"
         if "vm" not in st.session_state: st.session_state.vm=VM()
         vm=st.session_state.vm
         name=st.text_input("Save as"); 
@@ -289,4 +289,3 @@ if page=="Settings":
         with open(p,"wb") as f: f.write(file.getbuffer())
         set_active(p)
     st.write("Existing DBs:"); [st.write(f.name) for f in list_dbs()]
-
