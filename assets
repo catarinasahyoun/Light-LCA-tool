@@ -1,17 +1,63 @@
-{
-  "sustainability@tchai.nl": {
-    "salt": "4b17e2f9a8e07c91",
-    "hash": "da76525a75267add4c4a4f95605b07f2cd8aa4f104b4713dbbfbc4b2cb0a7199",
-    "created_at": "2025-08-21T12:00:00"
-  },
-  "jillderegt@tchai.nl": {
-    "salt": "f9c322c8e82ad047",
-    "hash": "d2b727701ab6a76190b461d24e82118a48854ef3bc415c9a0669d91b471a2c85",
-    "created_at": "2025-08-21T12:00:00"
-  },
-  "veravanbeaumont@tchai.nl": {
-    "salt": "bd9a48d0e0f2c176",
-    "hash": "ccd87efaa0c8c3232e2ef5909301ded3daf742da1c03557805a14a33890443fa",
-    "created_at": "2025-08-21T12:00:00"
-  }
-}
+# -----------------------------
+# Assets (robust) + Users + DB paths
+# -----------------------------
+from pathlib import Path
+from datetime import datetime
+import json, hashlib, secrets
+
+def ensure_dir(p: Path):
+    """
+    Ensure 'p' is a directory. If a *file* exists at that path,
+    rename it aside and create the directory.
+    """
+    if p.exists() and not p.is_dir():
+        backup = p.with_name(f"{p.name}_conflict_{datetime.now().strftime('%Y%m%d%H%M%S')}")
+        p.rename(backup)
+    p.mkdir(parents=True, exist_ok=True)
+
+# 1) Folders
+ASSETS = Path("assets")
+ensure_dir(ASSETS)
+
+DB_ROOT = ASSETS / "databases"
+ensure_dir(DB_ROOT)
+
+# 2) Files
+USERS_FILE = ASSETS / "users.json"
+ACTIVE_DB_FILE = DB_ROOT / "active.json"  # stores {"path": "<active .xlsx>"}
+
+# 3) Users bootstrap (NO self-signup; 3 pre-created accounts)
+def _hash(pw: str, salt: str) -> str:
+    return hashlib.sha256((salt + pw).encode()).hexdigest()
+
+def _save_users(users: dict):
+    USERS_FILE.write_text(json.dumps(users, indent=2))
+
+def _load_users() -> dict:
+    try:
+        return json.loads(USERS_FILE.read_text())
+    except Exception:
+        return {}
+
+def bootstrap_users_if_needed():
+    # If users.json is missing/empty, create your 3 accounts with a default password
+    users = _load_users()
+    if users:
+        return
+    default_pw = "ChangeMe123!"
+    emails = [
+        "sustainability@tchai.nl",
+        "jillderegt@tchai.nl",
+        "veravanbeaumont@tchai.nl",
+    ]
+    out = {}
+    for email in emails:
+        salt = secrets.token_hex(8)
+        out[email] = {
+            "salt": salt,
+            "hash": _hash(default_pw, salt),
+            "created_at": datetime.now().isoformat()
+        }
+    _save_users(out)
+
+bootstrap_users_if_needed()
