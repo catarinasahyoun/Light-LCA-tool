@@ -5,20 +5,16 @@ import plotly.express as px
 import json, re, base64, hashlib, secrets
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
 # =============================================================
-# TCHAI — Easy LCA Indicator (full app, robust Inputs)
-# - Front-page Sign-in (no self-signup) with 3 pre-created users:
-#   sustainability@tchai.nl / ChangeMe123!
-#   jillderegt@tchai.nl     / ChangeMe123!
-#   veravanbeaumont@tchai.nl/ ChangeMe123!
-# - Avatar menu: change password + sign out
-# - Sidebar: only the TCHAI logo + navigation (Inputs, Workspace, Settings)
-# - Inputs: robust sheet detection, tolerant column parsing, preview, session override upload
-# - Workspace tabs: Results, Comparison (purple), Final Summary, Report (HTML), Versions (save/load/delete)
-# - Settings: Database Manager (upload .xlsx, list, activate)
-# - B&W UI, purple charts; safe folder creation; st.rerun compatibility
+# TCHAI — Easy LCA Indicator
+# - Login (3 pre-created users) — no self-signup
+# - Per-user active DB persistence (survives refresh/restart)
+# - Materials & Processes parsed from the same Excel
+# - No sheet preview/overview display
+# - B&W UI with purple charts
+# - Report: HTML download
 # =============================================================
 
 st.set_page_config(
@@ -29,7 +25,7 @@ st.set_page_config(
 )
 
 # -----------------------------
-# Assets (robust) + Users + DB paths
+# Assets (robust) + paths
 # -----------------------------
 def ensure_dir(p: Path):
     """Ensure 'p' is a directory; if a file blocks the path, rename it and create the dir."""
@@ -45,7 +41,20 @@ DB_ROOT = ASSETS / "databases"
 ensure_dir(DB_ROOT)
 
 USERS_FILE = ASSETS / "users.json"
-ACTIVE_DB_FILE = DB_ROOT / "active.json"  # stores {"path": "<active .xlsx>"}
+# Per-user active database & sheet selections
+ACTIVE_MAP_FILE = DB_ROOT / "active_map.json"   # { "<email>": { "path": "...xlsx", "materials_sheet": "...", "processes_sheet": "..." } }
+
+# -----------------------------
+# Utilities: tiny persistence
+# -----------------------------
+def read_json(path: Path, default: Any) -> Any:
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return default
+
+def write_json(path: Path, data: Any):
+    path.write_text(json.dumps(data, indent=2))
 
 # -----------------------------
 # Rerun helper (compat)
@@ -53,7 +62,7 @@ ACTIVE_DB_FILE = DB_ROOT / "active.json"  # stores {"path": "<active .xlsx>"}
 def _rerun():
     if hasattr(st, "rerun"):
         st.rerun()
-    else:  # pragma: no cover
+    else:
         try:
             st.experimental_rerun()
         except Exception:
@@ -100,17 +109,15 @@ st.markdown(
 # -----------------------------
 # Auth helpers & bootstrap (3 users)
 # -----------------------------
+def _hash(pw: str, salt: str) -> str:
+    import hashlib
+    return hashlib.sha256((salt + pw).encode()).hexdigest()
+
 def _load_users() -> dict:
-    try:
-        return json.loads(USERS_FILE.read_text())
-    except Exception:
-        return {}
+    return read_json(USERS_FILE, {})
 
 def _save_users(users: dict):
-    USERS_FILE.write_text(json.dumps(users, indent=2))
-
-def _hash(pw: str, salt: str) -> str:
-    return hashlib.sha256((salt + pw).encode()).hexdigest()
+    write_json(USERS_FILE, users)
 
 def _initials(name: str) -> str:
     parts = [p for p in re.split(r"\s+|_+|\.+|@", name) if p]
@@ -137,25 +144,68 @@ def bootstrap_users_if_needed():
     _save_users(out)
 
 bootstrap_users_if_needed()
-
 if "auth_user" not in st.session_state:
     st.session_state.auth_user = None
 
 # -----------------------------
-# Sidebar (logo only + nav)
+# Per-user DB mapping helpers
+# -----------------------------
+def _load_active_map() -> Dict[str, Dict[str, str]]:
+    return read_json(ACTIVE_MAP_FILE, {})
+
+def _save_active_map(m: Dict[str, Dict[str, str]]):
+    write_json(ACTIVE_MAP_FILE, m)
+
+def set_user_active_db(email: str, xlsx_path: Path, materials_sheet: Optional[str] = None, processes_sheet: Optional[str] = None):
+    m = _load_active_map()
+    m[email] = {
+        "path": str(xlsx_path),
+        "materials_sheet": materials_sheet or m.get(email, {}).get("materials_sheet"),
+        "processes_sheet": processes_sheet or m.get(email, {}).get("processes_sheet"),
+    }
+    _save_active_map(m)
+
+def get_user_active_db(email: str) -> Optional[Path]:
+    m = _load_active_map()
+    rec = m.get(email)
+    if rec:
+        p = Path(rec.get("path", ""))
+        if p.exists():
+            return p
+    # fallback: newest uploaded
+    dbs = sorted(DB_ROOT.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return dbs[0] if dbs else None
+
+def get_user_sheet_prefs(email: str) -> Dict[str, Optional[str]]:
+    m = _load_active_map()
+    rec = m.get(email, {})
+    return {
+        "materials_sheet": rec.get("materials_sheet"),
+        "processes_sheet": rec.get("processes_sheet"),
+    }
+
+def set_user_sheet_prefs(email: str, materials_sheet: Optional[str], processes_sheet: Optional[str]):
+    m = _load_active_map()
+    rec = m.get(email, {})
+    rec["materials_sheet"] = materials_sheet
+    rec["processes_sheet"] = processes_sheet
+    m[email] = rec
+    _save_active_map(m)
+
+# -----------------------------
+# Sidebar
 # -----------------------------
 with st.sidebar:
     st.markdown(f"<div style='display:flex;justify-content:center;margin-bottom:10px'>{logo_tag(64)}</div>",
                 unsafe_allow_html=True)
     if st.session_state.auth_user:
         page = st.radio("Navigate", ["Inputs", "Workspace", "Settings"], index=0)
-        st.markdown("<div class='nav-note'>Inputs are separate. Workspace contains Results, Comparison, Final Summary, Report & Versions.</div>",
-                    unsafe_allow_html=True)
+        st.markdown("<div class='nav-note'>Inputs are separate. Workspace has Results, Comparison, Final Summary, Report & Versions.</div>", unsafe_allow_html=True)
     else:
         page = "Sign in"
 
 # -----------------------------
-# Header (big TCHAI left, title center, avatar right)
+# Header
 # -----------------------------
 cl, cm, cr = st.columns([0.18, 0.64, 0.18])
 with cl:
@@ -193,14 +243,9 @@ with cr:
                 if st.button("Sign out"):
                     st.session_state.auth_user = None
                     _rerun()
-        else:
-            st.markdown(f"<div class='avatar'>{initials}</div>", unsafe_allow_html=True)
-            if st.button("Sign out"):
-                st.session_state.auth_user = None
-                _rerun()
 
 # -----------------------------
-# Front-page Sign-in (hard gate)
+# Sign-in gate
 # -----------------------------
 if not st.session_state.auth_user:
     st.markdown("### Sign in to continue")
@@ -230,51 +275,25 @@ if not st.session_state.auth_user:
 # =============================
 
 # -----------------------------
-# Database management (robust)
+# Database helpers
 # -----------------------------
 def list_databases():
-    return sorted((ASSETS / "databases").glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return sorted(DB_ROOT.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
 
-def set_active_database(path: Path):
-    ACTIVE_DB_FILE.write_text(json.dumps({"path": str(path)}))
-    st.success(f"Activated database: {path.name}")
-    _rerun()
-
-def get_active_database_path() -> Optional[Path]:
-    # 1) explicit active.json
-    if ACTIVE_DB_FILE.exists():
-        try:
-            data = json.loads(ACTIVE_DB_FILE.read_text())
-            p = Path(data.get("path", ""))
-            if p.exists():
-                return p
-        except Exception:
-            pass
-    # 2) newest uploaded in assets/databases/
-    dbs = list_databases()
-    if dbs:
-        return dbs[0]
-    # 3) bundled fallbacks
-    for candidate in [ASSETS / "Refined database.xlsx",
-                      Path("Refined database.xlsx"),
-                      Path("database.xlsx")]:
-        if candidate.exists():
-            return candidate
+def _find_sheet(xls: pd.ExcelFile, target: str) -> Optional[str]:
+    names = xls.sheet_names
+    for n in names:
+        if n == target:
+            return n
+    t = re.sub(r"\s+", "", target.lower())
+    for n in names:
+        if re.sub(r"\s+", "", n.lower()) == t:
+            return n
+    for n in names:
+        if target.lower() in n.lower():
+            return n
     return None
 
-def load_active_excel() -> Optional[pd.ExcelFile]:
-    p = get_active_database_path()
-    if p and p.exists():
-        try:
-            return pd.ExcelFile(str(p))
-        except Exception as e:
-            st.error(f"Failed to open Excel: {p.name} — {e}")
-            return None
-    return None
-
-# -----------------------------
-# Parsing helpers (tolerant)
-# -----------------------------
 def extract_number(v):
     try:
         return float(v)
@@ -288,44 +307,23 @@ def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = [re.sub(r"\s+", " ", str(c).strip()).lower() for c in df.columns]
     return df
 
-def _find_sheet(xls: pd.ExcelFile, target: str) -> Optional[str]:
-    names = xls.sheet_names
-    # exact
-    for n in names:
-        if n == target:
-            return n
-    # trimmed / case-insensitive
-    t = re.sub(r"\s+", "", target.lower())
-    for n in names:
-        if re.sub(r"\s+", "", n.lower()) == t:
-            return n
-    # partial
-    for n in names:
-        if target.lower() in n.lower():
-            return n
-    return None
-
 def parse_materials(df_raw: pd.DataFrame) -> dict:
     if df_raw is None or df_raw.empty:
         return {}
     df = _normalize_cols(df_raw)
-
     def pick(aliases):
         for a in aliases:
             if a in df.columns:
                 return a
         return None
-
     col_name = pick(["material name","material","name"])
     col_co2  = pick(["co2e (kg)","co2e/kg","co2e","co2e per kg","co2 (kg)","emission factor"])
     col_rc   = pick(["recycled content","recycled content (%)","recycled","recycled %"])
     col_eol  = pick(["eol","end of life"])
     col_life = pick(["lifetime","life","lifespan","lifetime (years)"])
     col_circ = pick(["circularity","circ"])
-
     if not col_name or not col_co2:
         return {}
-
     out = {}
     for _, r in df.iterrows():
         name = (str(r[col_name]).strip() if pd.notna(r[col_name]) else "")
@@ -344,20 +342,16 @@ def parse_processes(df_raw: pd.DataFrame) -> dict:
     if df_raw is None or df_raw.empty:
         return {}
     df = _normalize_cols(df_raw)
-
     def pick(aliases):
         for a in aliases:
             if a in df.columns:
                 return a
         return None
-
     col_proc = pick(["process","step","operation"])
     col_co2  = pick(["co2e","co2e (kg)","co2","emission","factor"])
     col_unit = pick(["unit","uom"])
-
     if not col_proc or not col_co2:
         return {}
-
     out = {}
     for _, r in df.iterrows():
         name = (str(r[col_proc]).strip() if pd.notna(r[col_proc]) else "")
@@ -383,68 +377,57 @@ if "assessment" not in st.session_state:
     }
 
 # -----------------------------
-# Inputs (status + tolerant parsing + override uploader)
+# Inputs (NO previews; per-user DB; same Excel for materials+processes)
 # -----------------------------
 if page == "Inputs":
-    # Show current active DB + optional session override
-    active_path = get_active_database_path()
-    st.subheader("Database status")
-    c0, c1 = st.columns([0.6, 0.4])
-    with c0:
-        if active_path:
-            st.success(f"Active database: **{active_path.name}**")
-        else:
-            st.error("No active database found.")
-    with c1:
-        st.caption("Quick override (optional)")
-        override = st.file_uploader("Use a different Excel for this session", type=["xlsx"], key="override_db")
+    email = st.session_state.auth_user
+    active_path = get_user_active_db(email)
 
-    # Decide which Excel to load
-    if override is not None:
-        try:
-            xls = pd.ExcelFile(override)
-            st.info("Using the uploaded override Excel for this session.")
-        except Exception as e:
-            st.error(f"Could not open the uploaded Excel: {e}")
-            st.stop()
+    st.subheader("Database")
+    if active_path:
+        st.success(f"Active database for **{email}**: **{active_path.name}**")
     else:
-        xls = load_active_excel()
-
-    if not xls:
-        st.error("No Excel could be opened. Go to Settings → Database Manager and upload/activate one, or use the override above.")
+        st.error("No active database found for your account. Go to Settings → Database Manager and upload/activate one.")
         st.stop()
 
-    # Sheet detection + manual choice
-    auto_mat = _find_sheet(xls, "Materials")
-    auto_proc = _find_sheet(xls, "Processes")
+    # Load workbook
+    try:
+        xls = pd.ExcelFile(str(active_path))
+    except Exception as e:
+        st.error(f"Failed to open Excel: {active_path.name} — {e}")
+        st.stop()
 
-    c2, c3 = st.columns(2)
-    with c2:
-        st.caption("Sheets in workbook")
-        st.write(", ".join(xls.sheet_names))
+    # Sheet preferences (remember per-user)
+    prefs = get_user_sheet_prefs(email)
+    pref_mat = prefs.get("materials_sheet")
+    pref_pro = prefs.get("processes_sheet")
+    auto_mat = _find_sheet(xls, pref_mat) if pref_mat else _find_sheet(xls, "Materials")
+    auto_pro = _find_sheet(xls, pref_pro) if pref_pro else _find_sheet(xls, "Processes")
+
+    # Sheet selectors (no preview)
+    c1, c2 = st.columns(2)
+    with c1:
         mat_choice = st.selectbox("Materials sheet", options=xls.sheet_names,
                                   index=(xls.sheet_names.index(auto_mat) if auto_mat in xls.sheet_names else 0))
+    with c2:
         proc_choice = st.selectbox("Processes sheet", options=xls.sheet_names,
-                                   index=(xls.sheet_names.index(auto_proc) if auto_proc in xls.sheet_names else 0))
-    with c3:
-        st.caption(f"Preview of '{mat_choice}' (first 5 rows)")
-        try:
-            st.dataframe(pd.read_excel(xls, sheet_name=mat_choice).head(5), use_container_width=True)
-        except Exception as e:
-            st.warning(f"Preview error: {e}")
+                                   index=(xls.sheet_names.index(auto_pro) if auto_pro in xls.sheet_names else 0))
 
-    # Parse selected sheets
+    # Persist chosen sheets for this user
+    if (mat_choice != pref_mat) or (proc_choice != pref_pro):
+        set_user_sheet_prefs(email, mat_choice, proc_choice)
+
+    # Parse both sheets from the SAME workbook
     try:
         mats_df = pd.read_excel(xls, sheet_name=mat_choice)
         procs_df = pd.read_excel(xls, sheet_name=proc_choice)
         st.session_state.materials = parse_materials(mats_df)
         st.session_state.processes = parse_processes(procs_df)
     except Exception as e:
-        st.error(f"Could not read the selected sheets: {e}")
+        st.error(f"Could not parse selected sheets: {e}")
         st.stop()
 
     parsed_count = len(st.session_state.materials or {})
-    st.info(f"Parsed **{parsed_count}** materials from '{mat_choice}'.")
     if parsed_count == 0:
         st.warning("No materials parsed. Please check your column names. "
                    "Accepted aliases include: Material name/material/name, CO2e (kg)/CO2e, Recycled Content, EoL, Lifetime, Circularity.")
@@ -459,7 +442,7 @@ if page == "Inputs":
     st.subheader("Materials & processes")
     mats = list(st.session_state.materials.keys())
     st.session_state.assessment["selected_materials"] = st.multiselect(
-        "Select materials", options=mats, 
+        "Select materials", options=mats,
         default=st.session_state.assessment.get("selected_materials", [])
     )
 
@@ -487,23 +470,20 @@ if page == "Inputs":
                 steps.append({"process": "", "amount": 1.0, "co2e_per_unit": 0.0, "unit": ""})
 
         for i in range(int(n)):
-            proc = st.selectbox(
-                f"Process #{i+1}", 
-                options=[''] + list(st.session_state.processes.keys()),
-                index=([''] + list(st.session_state.processes.keys())).index(steps[i]['process'])
-                    if steps[i]['process'] in st.session_state.processes else 0,
-                key=f"proc_{m}_{i}"
-            )
+            proc_options = [''] + list(st.session_state.processes.keys())
+            current_proc = steps[i].get('process', '')
+            idx = proc_options.index(current_proc) if current_proc in proc_options else 0
+            proc = st.selectbox(f"Process #{i+1}", options=proc_options, index=idx, key=f"proc_{m}_{i}")
             if proc:
                 pr = st.session_state.processes.get(proc, {})
                 amt = st.number_input(
-                    f"Amount for '{proc}' ({pr.get('Unit','')})", 
+                    f"Amount for '{proc}' ({pr.get('Unit','')})",
                     min_value=0.0, value=float(steps[i].get('amount', 1.0)), key=f"amt_{m}_{i}"
                 )
                 steps[i] = {"process": proc, "amount": amt, "co2e_per_unit": pr.get('CO₂e', 0.0), "unit": pr.get('Unit', '')}
 
 # -----------------------------
-# Compute results (shared)
+# Compute results
 # -----------------------------
 def compute_results():
     data = st.session_state.assessment
@@ -555,7 +535,7 @@ def compute_results():
     }
 
 # -----------------------------
-# Workspace (tabs)
+# Workspace
 # -----------------------------
 if page == "Workspace":
     if not st.session_state.assessment.get('selected_materials'):
@@ -572,7 +552,7 @@ if page == "Workspace":
         c2.metric("Total CO₂ (processes)", f"{R['total_process_co2']:.1f} kg")
         c3.metric("Weighted recycled", f"{R['weighted_recycled']:.1f}%")
 
-    # Comparison (purple charts)
+    # Comparison
     with tabs[1]:
         df = pd.DataFrame(R['comparison'])
         if df.empty:
@@ -592,26 +572,6 @@ if page == "Workspace":
                 fig = px.bar(df, x="Material", y="Recycled Content (%)", color="Material",
                              title="Recycled Content (%)", color_discrete_sequence=PURPLE)
                 st.plotly_chart(style(fig), use_container_width=True)
-            c3, c4 = st.columns(2)
-            with c3:
-                fig = px.bar(df, x="Material", y="Circularity (mapped)", color="Material",
-                             title="Circularity", color_discrete_sequence=PURPLE)
-                fig.update_yaxes(tickmode='array', tickvals=[0,1,2,3],
-                                 ticktext=['Not Circular','Low','Medium','High'])
-                st.plotly_chart(style(fig), use_container_width=True)
-            with c4:
-                d = df.copy()
-                def life_cat(x):
-                    v = extract_number(x)
-                    return 'Short' if v < 5 else ('Medium' if v <= 15 else 'Long')
-                d['Lifetime Category'] = d['Lifetime (years)'].apply(life_cat)
-                MAP = {"Short":1, "Medium":2, "Long":3}
-                d['Lifetime'] = d['Lifetime Category'].map(MAP)
-                fig = px.bar(d, x="Material", y="Lifetime", color="Material",
-                             title="Lifetime", color_discrete_sequence=PURPLE)
-                fig.update_yaxes(tickmode='array', tickvals=[1,2,3],
-                                 ticktext=['Short','Medium','Long'])
-                st.plotly_chart(style(fig), use_container_width=True)
 
     # Final Summary
     with tabs[2]:
@@ -619,7 +579,7 @@ if page == "Workspace":
         m1.markdown(f"<div class='metric'><div>Total Impact CO₂e</div><h2>{R['overall_co2']:.1f} kg</h2></div>", unsafe_allow_html=True)
         m2.markdown(f"<div class='metric'><div>Tree Equivalent / year</div><h2>{R['trees_equiv']:.1f}</h2></div>", unsafe_allow_html=True)
         m3.markdown(f"<div class='metric'><div>Total Trees</div><h2>{R['total_trees_equiv']:.1f}</h2></div>", unsafe_allow_html=True)
-        st.markdown("#### End‑of‑Life Summary")
+        st.markdown("#### End-of-Life Summary")
         for k, v in R['eol_summary'].items():
             st.write(f"• **{k}** — {v}")
 
@@ -645,7 +605,7 @@ if page == "Workspace":
             <li>Materials: {R['total_material_co2']:.1f} kg · Processes: {R['total_process_co2']:.1f} kg</li>
             <li>Trees/year: {R['trees_equiv']:.1f} · Total trees: {R['total_trees_equiv']:.1f}</li>
           </ul>
-          <h3>End‑of‑Life</h3>
+          <h3>End-of-Life</h3>
           <ul>{''.join([f"<li><b>{k}</b> — {v}</li>" for k,v in R['eol_summary'].items()])}</ul>
           <h3>Notes</h3><div>{notes or '—'}</div>
         </body></html>
@@ -656,7 +616,6 @@ if page == "Workspace":
             file_name=f"TCHAI_Report_{project.replace(' ','_')}.html",
             mime="text/html"
         )
-        st.caption("If you prefer PDF only later, we can add server-side HTML→PDF.")
 
     # Versions
     with tabs[4]:
@@ -664,10 +623,10 @@ if page == "Workspace":
             def __init__(self, storage_dir: str = "lca_versions"):
                 self.dir = Path(storage_dir); self.dir.mkdir(exist_ok=True)
                 self.meta = self.dir / "lca_versions_metadata.json"
-            def _load(self): 
-                return json.loads(self.meta.read_text()) if self.meta.exists() else {}
-            def _save(self, m): 
-                self.meta.write_text(json.dumps(m, indent=2))
+            def _load(self):
+                return read_json(self.meta, {})
+            def _save(self, m):
+                write_json(self.meta, m)
             def save(self, name, data, desc=""):
                 m = self._load()
                 if not name:
@@ -677,13 +636,7 @@ if page == "Workspace":
                 fp = self.dir / f"{name}.json"
                 payload = {"assessment_data": data, "timestamp": datetime.now().isoformat(), "description": desc}
                 fp.write_text(json.dumps(payload))
-                m[name] = {
-                    "filename": fp.name,
-                    "description": desc,
-                    "created_at": datetime.now().isoformat(),
-                    "materials_count": len(data.get('selected_materials', [])),
-                    "total_co2": data.get('overall_co2', 0)
-                }
+                m[name] = {"filename": fp.name, "description": desc, "created_at": datetime.now().isoformat()}
                 self._save(m)
                 return True, "Saved."
             def list(self):
@@ -695,11 +648,7 @@ if page == "Workspace":
                 fp = self.dir / m[name]["filename"]
                 if not fp.exists():
                     return None, "File missing."
-                try:
-                    payload = json.loads(fp.read_text())
-                    return payload.get("assessment_data", {}), "Loaded."
-                except Exception as e:
-                    return None, f"Read error: {e}"
+                return json.loads(fp.read_text())["assessment_data"], "Loaded."
             def delete(self, name):
                 m = self._load()
                 if name not in m:
@@ -711,7 +660,8 @@ if page == "Workspace":
                 self._save(m)
                 return True, "Deleted."
 
-        if "vm" not in st.session_state: st.session_state.vm = VM()
+        if "vm" not in st.session_state:
+            st.session_state.vm = VM()
         vm = st.session_state.vm
 
         t1, t2, t3 = st.tabs(["Save", "Load", "Manage"])
@@ -720,7 +670,7 @@ if page == "Workspace":
             desc = st.text_area("Description (optional)")
             if st.button("💾 Save"):
                 data = {**st.session_state.assessment}
-                data.update(compute_results())
+                data.update(R)
                 ok, msg = vm.save(name, data, desc)
                 st.success(msg) if ok else st.error(msg)
 
@@ -747,3 +697,30 @@ if page == "Workspace":
                 if st.button("🗑️ Delete"):
                     ok, msg = vm.delete(sel)
                     st.success(msg) if ok else st.error(msg)
+
+# -----------------------------
+# Settings (Database Manager) — per-user activation; NO preview
+# -----------------------------
+if page == "Settings":
+    email = st.session_state.auth_user
+    st.subheader("Database Manager")
+    up = st.file_uploader("Upload new database (.xlsx)", type=["xlsx"])
+    if up:
+        # Save into assets/databases and auto-activate for this user
+        target = DB_ROOT / f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{up.name}"
+        with open(target, "wb") as f:
+            f.write(up.read())
+        set_user_active_db(email, target)  # remember for this user
+        st.success(f"Uploaded and activated for {email}: {target.name}")
+        _rerun()
+
+    st.markdown("### Available databases (in assets/databases)")
+    for db in list_databases():
+        cols = st.columns([0.7, 0.3])
+        with cols[0]:
+            st.write(db.name)
+        with cols[1]:
+            if st.button(f"Activate for me", key=f"act_{db.name}"):
+                set_user_active_db(email, db)
+                st.success(f"Activated for {email}: {db.name}")
+                _rerun()
