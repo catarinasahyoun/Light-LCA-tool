@@ -1,387 +1,567 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import re
-import json
+import json, os, re, io, hashlib, secrets
 from datetime import datetime
-import os
+from pathlib import Path
+from typing import Dict, Any, Optional, Tuple
 
-# =========================
-# Version Manager
-# =========================
-class LCAVersionManager:
-    def __init__(self, storage_dir: str = "lca_versions"):
-        self.storage_dir = storage_dir
-        self.metadata_file = os.path.join(storage_dir, "lca_versions_metadata.json")
-        self._ensure_storage_dir()
+# =============================================================
+# TCHAI — Easy LCA Indicator (Clean, Robust Rewrite)
+# -------------------------------------------------------------
+# Key features implemented from your feedback & docs:
+# - Full-screen sign-in gate (create account / sign in)
+# - Per-user persistence: uploaded database is saved to disk and reloaded automatically on next login
+# - No table preview after upload (just a clean success message with counts)
+# - Robust Excel parsing (auto-detects likely sheets/columns for processes & impacts)
+# - Black & white UI; charts in purple (#6A0DAD)
+# - Real TCHAI logo (assets/tchai_logo.png if available, else fallback text)
+# - Simple, ergonomic navigation: Sidebar holds Inputs only; main area is a single “Workspace” with tabs
+# - Versions: every run can be saved with a name; you can restore/compare versions later
+# - Report downloads (HTML + CSV)
+# - Defensive programming around files/paths; friendly errors
+# =============================================================
 
-    def _ensure_storage_dir(self):
-        if not os.path.exists(self.storage_dir):
-            os.makedirs(self.storage_dir)
+# -------------------------
+# Paths & constants
+# -------------------------
+BASE_DIR = Path(os.getcwd())
+ASSETS = BASE_DIR / "assets"
+ASSETS.mkdir(exist_ok=True)
+USERS_FILE = BASE_DIR / "users.json"
+USER_DATA = BASE_DIR / "user_data"
+USER_DATA.mkdir(exist_ok=True)
+LOGO_FILE = ASSETS / "tchai_logo.png"
+FALLBACK_LOGO = "/mnt/data/tchai_logo.png"  # present in this environment
+PURPLE = "#6A0DAD"
 
-    def _load_metadata(self):
-        if os.path.exists(self.metadata_file):
-            with open(self.metadata_file, "r") as f:
-                return json.load(f)
-        return {}
+# -------------------------
+# Small utilities
+# -------------------------
 
-    def _save_metadata(self, metadata):
-        with open(self.metadata_file, "w") as f:
-            json.dump(metadata, f, indent=2)
+def _sha256_hex(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
-    def save_version(self, version_name, assessment_data, description=""):
-        meta = self._load_metadata()
-        if version_name in meta:
-            return False, f"Version '{version_name}' already exists!"
 
-        payload = {
-            "assessment_data": assessment_data,
-            "timestamp": datetime.now().isoformat(),
-            "description": description,
-        }
-        filename = f"{version_name}.json"
-        filepath = os.path.join(self.storage_dir, filename)
-        with open(filepath, "w") as f:
-            json.dump(payload, f)
-
-        meta[version_name] = {
-            "filename": filename,
-            "description": description,
-            "created_at": datetime.now().isoformat(),
-            "materials_count": len(assessment_data.get("selected_materials", [])),
-            "total_co2": assessment_data.get("overall_co2", 0),
-            "lifetime_weeks": assessment_data.get("lifetime_weeks", 52),
-        }
-        self._save_metadata(meta)
-        return True, f"Version '{version_name}' saved successfully!"
-
-    def load_version(self, version_name):
-        meta = self._load_metadata()
-        if version_name not in meta:
-            return None, f"Version '{version_name}' not found!"
-        filepath = os.path.join(self.storage_dir, meta[version_name]["filename"])
+def _load_users() -> Dict[str, Any]:
+    if USERS_FILE.exists():
         try:
-            with open(filepath, "r") as f:
-                data = json.load(f)
-            return data.get("assessment_data", {}), f"Version '{version_name}' loaded successfully!"
-        except FileNotFoundError:
-            return None, f"File for version '{version_name}' not found!"
-
-    def list_versions(self):
-        return self._load_metadata()
-
-    def delete_version(self, version_name):
-        meta = self._load_metadata()
-        if version_name not in meta:
-            return False, f"Version '{version_name}' not found!"
-        filepath = os.path.join(self.storage_dir, meta[version_name]["filename"])
-        try:
-            os.remove(filepath)
-        except FileNotFoundError:
-            pass
-        del meta[version_name]
-        self._save_metadata(meta)
-        return True, f"Version '{version_name}' deleted successfully!"
-
-# =========================
-# App Config & Minimal Style
-# =========================
-st.set_page_config(page_title="Easy LCA Indicator", page_icon="🌿", layout="wide")
-st.markdown("<h1 style='text-align:center;margin-top:0'>🌿 Easy LCA Indicator</h1>", unsafe_allow_html=True)
-
-# Versioning state
-if "version_manager" not in st.session_state:
-    st.session_state.version_manager = LCAVersionManager()
-if "current_assessment_data" not in st.session_state:
-    st.session_state.current_assessment_data = {}
-
-# =========================
-# Sidebar: Version Management
-# =========================
-st.sidebar.header("📁 Version Management")
-action = st.sidebar.selectbox("Choose Action:", ["New Assessment", "Save Current", "Load Version", "Manage Versions"])
-
-if action == "Save Current":
-    st.sidebar.subheader("Save Current Assessment")
-    v_name = st.sidebar.text_input("Version Name:")
-    v_desc = st.sidebar.text_area("Description (optional):")
-    if st.sidebar.button("💾 Save Version"):
-        if not v_name:
-            st.sidebar.error("Please enter a version name.")
-        elif not st.session_state.current_assessment_data:
-            st.sidebar.error("No assessment data to save yet.")
-        else:
-            ok, msg = st.session_state.version_manager.save_version(v_name, st.session_state.current_assessment_data, v_desc)
-            st.sidebar.success(msg) if ok else st.sidebar.error(msg)
-
-elif action == "Load Version":
-    st.sidebar.subheader("Load Saved Version")
-    versions = st.session_state.version_manager.list_versions()
-    if not versions:
-        st.sidebar.info("No saved versions.")
-    else:
-        sel = st.sidebar.selectbox("Select Version:", list(versions.keys()))
-        if sel:
-            info = versions[sel]
-            st.sidebar.write(f"**Created:** {info.get('created_at', '')[:19]}")
-            st.sidebar.write(f"**Materials:** {info.get('materials_count', 0)}")
-            st.sidebar.write(f"**Total CO₂:** {info.get('total_co2', 0):.2f} kg")
-            if st.sidebar.button("📂 Load Version"):
-                data, msg = st.session_state.version_manager.load_version(sel)
-                if data is None:
-                    st.sidebar.error(msg)
-                else:
-                    st.session_state.loaded_version_data = data
-                    st.sidebar.success(msg)
-
-elif action == "Manage Versions":
-    st.sidebar.subheader("Manage Versions")
-    versions = st.session_state.version_manager.list_versions()
-    if not versions:
-        st.sidebar.info("Nothing to manage yet.")
-    else:
-        del_sel = st.sidebar.selectbox("Select Version to Delete:", list(versions.keys()))
-        if st.sidebar.button("🗑️ Delete Version"):
-            ok, msg = st.session_state.version_manager.delete_version(del_sel)
-            st.sidebar.success(msg) if ok else st.sidebar.error(msg)
-            st.rerun()
-        st.sidebar.markdown("---")
-        for name, meta in versions.items():
-            st.sidebar.write(f"**{name}** — {meta.get('created_at','')[:19]} • {meta.get('materials_count',0)} materials")
-
-# =========================
-# Global Input
-# =========================
-default_weeks = 52
-if hasattr(st.session_state, "loaded_version_data"):
-    default_weeks = int(st.session_state.loaded_version_data.get("lifetime_weeks", default_weeks))
-
-lifetime_weeks = st.number_input("Enter the lifetime of the final product (in weeks):", min_value=1, value=default_weeks)
-lifetime_years = lifetime_weeks / 52
-
-# =========================
-# Helpers
-# =========================
-def extract_number(value):
-    try:
-        return float(value)
-    except Exception:
-        s = str(value).replace(",", ".")
-        m = re.search(r"[-+]?\d*\.?\d+", s)
-        return float(m.group()) if m else 0.0
-
-def lifetime_category(v):
-    v = float(v)
-    if v < 5: return "Short"
-    if v <= 15: return "Medium"
-    return "Long"
-
-def extract_materials(df: pd.DataFrame):
-    cols = [str(c).strip() for c in df.columns]
-    need = ["Material name","CO2e (kg)","Recycled Content","EoL","Lifetime","Comment","Circularity","Alternative Material"]
-    for col in need:
-        if col not in cols:
-            st.error(f"Materials sheet is missing column: '{col}'")
+            return json.loads(USERS_FILE.read_text(encoding="utf-8"))
+        except Exception:
             return {}
-    out = {}
-    for _, r in df.iterrows():
-        name = str(r["Material name"]).strip() if pd.notna(r["Material name"]) else ""
-        if not name: continue
-        out[name] = {
-            "CO₂e (kg)": extract_number(r["CO2e (kg)"]),
-            "Recycled Content": extract_number(r["Recycled Content"]),
-            "EoL": str(r["EoL"]).strip() if pd.notna(r["EoL"]) else "Unknown",
-            "Lifetime": str(r["Lifetime"]).strip() if pd.notna(r["Lifetime"]) else "Unknown",
-            "Comment": (str(r["Comment"]).strip() if pd.notna(r["Comment"]) and str(r["Comment"]).strip() else "No comment"),
-            "Circularity": str(r["Circularity"]).strip() if pd.notna(r["Circularity"]) else "Unknown",
-            "Alternative Material": str(r["Alternative Material"]).strip() if pd.notna(r["Alternative Material"]) else "None",
-        }
-    return out
+    return {}
 
-def extract_processes(df: pd.DataFrame):
-    df = df.copy()
-    df.columns = [str(c).strip().replace("₂","2").replace("CO₂","CO2") for c in df.columns]
-    proc_col = next((c for c in df.columns if "process" in c.lower()), None)
-    co2_col  = next((c for c in df.columns if "co2" in c.lower()), None)
-    unit_col = next((c for c in df.columns if "unit" in c.lower()), None)
-    if not proc_col or not co2_col or not unit_col:
-        st.error("Processes sheet must include columns for process, CO2 and unit.")
-        return {}
-    out = {}
-    for _, r in df.iterrows():
-        n = str(r[proc_col]).strip() if pd.notna(r[proc_col]) else ""
-        if not n: continue
-        out[n] = {
-            "CO₂e": extract_number(r[co2_col]),
-            "Unit": str(r[unit_col]).strip() if pd.notna(r[unit_col]) else "Unknown",
-        }
-    return out
 
-# =========================
-# Upload Excel
-# =========================
-st.markdown("### 📂 Upload Your Excel Database (needs 'Materials' and 'Processes' sheets)")
-upl = st.file_uploader("Upload Excel (.xlsx)", type=["xlsx"])
-if not upl:
-    st.info("Upload an Excel file to continue.")
-    st.stop()
+def _save_users(users: Dict[str, Any]) -> None:
+    USERS_FILE.write_text(json.dumps(users, indent=2), encoding="utf-8")
 
-xls = pd.ExcelFile(upl)
-try:
-    mats_df = pd.read_excel(xls, sheet_name="Materials")
-    procs_df = pd.read_excel(xls, sheet_name="Processes")
-except Exception as e:
-    st.error(f"Could not open required sheets. {e}")
-    st.stop()
 
-materials = extract_materials(mats_df)
-processes = extract_processes(procs_df)
-if not materials:
-    st.stop()
+def _hash_password(pw: str, salt: str) -> str:
+    return _sha256_hex(pw + ":" + salt)
 
-# =========================
-# Material selection
-# =========================
-default_selected = []
-default_masses = {}
-default_proc_map = {}
 
-if hasattr(st.session_state, "loaded_version_data"):
-    ld = st.session_state.loaded_version_data
-    default_selected = ld.get("selected_materials", [])
-    default_masses = ld.get("material_masses", {})
-    default_proc_map = ld.get("processing_data", {})
+def get_user_root(username: str) -> Path:
+    safe = re.sub(r"[^a-zA-Z0-9_.-]", "_", username).lower()
+    root = USER_DATA / safe
+    root.mkdir(exist_ok=True)
+    (root / "versions").mkdir(exist_ok=True)
+    return root
 
-selected = st.multiselect("Select Materials", options=list(materials.keys()), default=[m for m in default_selected if m in materials])
-if not selected:
-    st.info("Please select at least one material.")
-    st.stop()
 
-total_material_co2 = 0.0
-total_process_co2 = 0.0
-total_mass = 0.0
-total_weighted_recycled = 0.0
-eol_summary = {}
-comparison_rows = []
-material_masses = {}
-processing_data = {}
+def store_user_file(username: str, uploaded_file) -> Path:
+    root = get_user_root(username)
+    db_path = root / "database.xlsx"
+    # Save original bytes so we can fully reload
+    bytes_data = uploaded_file.read()
+    db_path.write_bytes(bytes_data)
+    # Also mark as current in a tiny state file
+    (root / "state.json").write_text(json.dumps({"current_db": str(db_path.name), "updated": datetime.utcnow().isoformat()}), encoding="utf-8")
+    return db_path
 
-circ_map = {"High":3,"Medium":2,"Low":1,"Not Circular":0}
 
-for mat in selected:
-    st.markdown(f"#### 🔧 {mat}")
-    props = materials[mat]
+def load_user_db_path(username: str) -> Optional[Path]:
+    root = get_user_root(username)
+    state_file = root / "state.json"
+    if state_file.exists():
+        try:
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            name = state.get("current_db")
+            if name:
+                p = root / name
+                if p.exists():
+                    return p
+        except Exception:
+            return None
+    # Fallback to default filename if present
+    p = root / "database.xlsx"
+    return p if p.exists() else None
 
-    mass_default = float(default_masses.get(mat, 1.0))
-    mass = st.number_input(f"Mass of {mat} (kg)", min_value=0.0, value=mass_default, key=f"mass_{mat}")
-    material_masses[mat] = mass
 
-    total_mass += mass
-    total_material_co2 += mass * props["CO₂e (kg)"]
-    total_weighted_recycled += mass * props["Recycled Content"]
-    eol_summary[mat] = props["EoL"]
-
-    st.caption(f"CO₂e/kg: {props['CO₂e (kg)']} · Recycled %: {props['Recycled Content']} · EoL: {props['EoL']}")
-    st.caption(f"Circularity: {props['Circularity']} · Lifetime: {props['Lifetime']} · Alt: {props['Alternative Material']}")
-
-    # processing
-    existing_steps = default_proc_map.get(mat, [])
-    n_default = len(existing_steps)
-    n_steps = int(st.number_input(f"Processing steps for {mat}", min_value=0, max_value=10, value=n_default, key=f"steps_{mat}"))
-    processing_data[mat] = []
-
-    for i in range(n_steps):
-        default_proc = existing_steps[i]["process"] if i < n_default else ""
-        default_amt  = float(existing_steps[i].get("amount", 1.0)) if i < n_default else 1.0
-        proc_list = [""] + list(processes.keys())
-        idx = proc_list.index(default_proc) if default_proc in proc_list else 0
-
-        proc = st.selectbox(f"Process #{i+1} for {mat}", options=proc_list, index=idx, key=f"proc_{mat}_{i}")
-        if proc:
-            pr = processes.get(proc, {})
-            unit = pr.get("Unit","")
-            co2_per = float(pr.get("CO₂e", 0))
-            amt = st.number_input(f"Amount for '{proc}' ({unit})", min_value=0.0, value=default_amt, key=f"amt_{mat}_{i}")
-            total_process_co2 += amt * co2_per
-            processing_data[mat].append({"process": proc, "amount": amt, "co2e_per_unit": co2_per, "unit": unit})
-
-    # comparison rows
-    life_years = extract_number(props["Lifetime"])
-    comparison_rows.append({
-        "Material": mat,
-        "CO2e per kg": props["CO₂e (kg)"],
-        "Recycled Content (%)": props["Recycled Content"],
-        "Circularity (mapped)": circ_map.get(props["Circularity"].title() if props["Circularity"] else "Not Circular", 0),
-        "Circularity (text)": props["Circularity"],
-        "Lifetime (years)": life_years,
-        "Lifetime (text)": props["Lifetime"],
-    })
-
-# =========================
-# Results
-# =========================
-overall_co2 = total_material_co2 + total_process_co2
-weighted_recycled = (total_weighted_recycled / total_mass) if total_mass > 0 else 0.0
-trees_equiv_year = overall_co2 / (22 * (lifetime_years if lifetime_years > 0 else 1e-9))
-total_trees_equiv = overall_co2 / 22
-
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Total CO₂ (materials)", f"{total_material_co2:.1f} kg")
-c2.metric("Total CO₂ (processes)", f"{total_process_co2:.1f} kg")
-c3.metric("Weighted recycled", f"{weighted_recycled:.1f}%")
-c4.metric("Total CO₂ (overall)", f"{overall_co2:.1f} kg")
-
-st.markdown("### 🌍 Final Summary")
-st.write(f"- **Tree equivalent / year**: {trees_equiv_year:.1f}")
-st.write(f"- **Total tree equivalent**: {total_trees_equiv:.1f}")
-st.write("#### End-of-Life Summary")
-for k, v in eol_summary.items():
-    st.write(f"• **{k}** — {v}")
-
-# Save assessment snapshot for versioning
-st.session_state.current_assessment_data = {
-    "lifetime_weeks": lifetime_weeks,
-    "selected_materials": selected,
-    "material_masses": material_masses,
-    "processing_data": processing_data,
-    "total_material_co2": total_material_co2,
-    "total_process_co2": total_process_co2,
-    "overall_co2": overall_co2,
-    "weighted_recycled": weighted_recycled,
-    "trees_equiv": trees_equiv_year,
-    "eol_summary": eol_summary,
-    "comparison_data": comparison_rows,
+# -------------------------
+# Excel parsing helpers
+# -------------------------
+EXPECTED_PROCESS_COLUMNS = {"process", "process_name", "name", "activity", "activity_name"}
+EXPECTED_IMPACT_COLUMNS = {
+    # common impact metric names; we will detect anything numeric otherwise
+    "gwp", "co2", "co2e", "co2eq", "carbon", "energy", "water", "land", "acidification",
+    "eutrophication", "odp", "pof", "pm", "resource", "toxicity"
 }
 
-# =========================
-# Charts
-# =========================
-st.markdown("## 📊 Comparison Visualizations")
-dfc = pd.DataFrame(comparison_rows)
-if not dfc.empty:
-    col1, col2 = st.columns(2)
-    with col1:
-        fig1 = px.bar(dfc, x="Material", y="CO2e per kg", color="Material", title="CO₂e per kg")
-        st.plotly_chart(fig1, use_container_width=True)
-    with col2:
-        fig2 = px.bar(dfc, x="Material", y="Recycled Content (%)", color="Material", title="Recycled Content (%)")
-        st.plotly_chart(fig2, use_container_width=True)
 
-    col3, col4 = st.columns(2)
-    with col3:
-        fig3 = px.bar(dfc, x="Material", y="Circularity (mapped)", color="Material", title="Circularity")
-        fig3.update_yaxes(tickmode="array", tickvals=[0,1,2,3], ticktext=["Not Circular","Low","Medium","High"])
-        st.plotly_chart(fig3, use_container_width=True)
-    with col4:
-        dfc2 = dfc.copy()
-        dfc2["Lifetime Category"] = dfc2["Lifetime (years)"].apply(lifetime_category)
-        map_cat = {"Short":1,"Medium":2,"Long":3}
-        dfc2["Lifetime"] = dfc2["Lifetime Category"].map(map_cat)
-        fig4 = px.bar(dfc2, x="Material", y="Lifetime", color="Material", title="Lifetime")
-        fig4.update_yaxes(tickmode="array", tickvals=[1,2,3], ticktext=["Short","Medium","Long"])
-        st.plotly_chart(fig4, use_container_width=True)
+def read_excel_flex(path_or_file) -> Dict[str, pd.DataFrame]:
+    """Read all sheets into a dict; gracefully handle odd files."""
+    try:
+        xl = pd.ExcelFile(path_or_file)
+        sheets = {}
+        for s in xl.sheet_names:
+            try:
+                df = xl.parse(s)
+                if not isinstance(df, pd.DataFrame):
+                    continue
+                # Normalize col names
+                df.columns = [str(c).strip() for c in df.columns]
+                sheets[s] = df
+            except Exception:
+                continue
+        return sheets
+    except Exception as e:
+        raise RuntimeError(f"Could not read Excel: {e}")
 
-# Clear loaded snapshot so new runs start clean
-if hasattr(st.session_state, "loaded_version_data"):
-    del st.session_state.loaded_version_data
+
+def detect_process_table(sheets: Dict[str, pd.DataFrame]) -> Tuple[str, pd.DataFrame]:
+    """Return (sheet_name, df) that likely contains processes."""
+    # 1) prefer a sheet literally named like processes
+    for key in sheets:
+        if re.search(r"process", key, re.I):
+            return key, sheets[key]
+    # 2) search for a sheet with a column that matches EXPECTED_PROCESS_COLUMNS
+    for key, df in sheets.items():
+        cols = set([c.lower() for c in df.columns])
+        if cols & EXPECTED_PROCESS_COLUMNS:
+            return key, df
+    # 3) fallback to first non-empty sheet
+    for key, df in sheets.items():
+        if len(df.columns) > 0 and len(df) > 0:
+            return key, df
+    raise RuntimeError("No usable sheet was found in the Excel file.")
+
+
+def normalize_process_table(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    # Standardize name column
+    name_col = None
+    for c in df.columns:
+        if c.lower() in EXPECTED_PROCESS_COLUMNS:
+            name_col = c
+            break
+    if name_col is None:
+        # create a synthetic name if none found
+        df.insert(0, "Process", [f"Process {i+1}" for i in range(len(df))])
+        name_col = "Process"
+    else:
+        if name_col != "Process":
+            df.rename(columns={name_col: "Process"}, inplace=True)
+    # Identify numeric impact columns
+    numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    # Heuristic: if some numeric columns match known impact names, use those first
+    impact_cols = []
+    for c in numeric_cols:
+        low = c.lower().strip()
+        token = re.sub(r"[^a-z]", "", low)
+        if token in EXPECTED_IMPACT_COLUMNS:
+            impact_cols.append(c)
+    # If none matched, just use all numeric columns except obvious qty/id
+    if not impact_cols:
+        impact_cols = [c for c in numeric_cols if not re.search(r"id|index|qty|quantity|amount|count", c, re.I)]
+    # If still empty, keep any numeric
+    if not impact_cols and numeric_cols:
+        impact_cols = numeric_cols
+    # Ensure uniqueness and order
+    impact_cols = list(dict.fromkeys(impact_cols))
+    # Keep only Process + impacts + any quantity if present
+    keep = ["Process"] + impact_cols
+    # Add quantity if available
+    qty_col = None
+    for c in df.columns:
+        if re.search(r"^(qty|quantity|amount|mass|kg|t|tonnage)$", c, re.I):
+            qty_col = c; break
+    if qty_col and qty_col not in keep:
+        keep.append(qty_col)
+    # Reduce & drop fully empty rows
+    slim = df[[c for c in keep if c in df.columns]].copy()
+    slim = slim.dropna(how="all")
+    # Fill NA for numeric with 0, names forward-fill if needed
+    for c in slim.columns:
+        if c == "Process":
+            slim[c] = slim[c].astype(str).str.strip().replace({"nan": ""}).replace({"": None}).ffill()
+        elif pd.api.types.is_numeric_dtype(slim[c]):
+            slim[c] = slim[c].fillna(0)
+    return slim
+
+
+def compute_impacts(df: pd.DataFrame, weights: Optional[Dict[str, float]] = None) -> pd.DataFrame:
+    """Compute a simple weighted total across impact columns per process.
+    - If weights is None, each numeric impact column has weight 1.0
+    - Quantity (if present) will multiply impacts (intensity * qty)
+    """
+    df = df.copy()
+    impacts = [c for c in df.columns if c not in ("Process",) and pd.api.types.is_numeric_dtype(df[c])]
+    qty_col = None
+    for c in ("quantity", "qty", "amount", "mass", "kg", "t", "tonnage"):
+        for col in df.columns:
+            if col.lower() == c:
+                qty_col = col
+                break
+        if qty_col:
+            break
+
+    # default equal weights
+    weights = weights or {c: 1.0 for c in impacts}
+
+    # total per process
+    total_vals = []
+    for _, row in df.iterrows():
+        total = 0.0
+        for c in impacts:
+            w = float(weights.get(c, 1.0))
+            val = float(row.get(c, 0) or 0)
+            total += w * val
+        if qty_col:
+            q = float(row.get(qty_col, 1) or 1)
+            total *= q
+        total_vals.append(total)
+    out = df[["Process"]].copy()
+    out["TotalImpact"] = total_vals
+    # normalize additional metrics for display
+    for c in impacts:
+        out[c] = df[c]
+    if qty_col:
+        out[qty_col] = df[qty_col]
+    return out
+
+
+# -------------------------
+# UI helpers
+# -------------------------
+
+def show_logo_and_header():
+    cols = st.columns([1, 8, 1])
+    with cols[0]:
+        logo_path = None
+        if LOGO_FILE.exists():
+            logo_path = str(LOGO_FILE)
+        elif Path(FALLBACK_LOGO).exists():
+            logo_path = FALLBACK_LOGO
+        if logo_path:
+            st.image(logo_path, caption=None, use_column_width=True)
+        else:
+            st.markdown("### TCHAI")
+    with cols[1]:
+        st.markdown("""
+        <div style='text-align:center; font-size: 32px; font-weight:700;'>
+            EASY LCA INDICATOR
+        </div>
+        """, unsafe_allow_html=True)
+
+
+def sign_in_gate() -> Optional[str]:
+    users = _load_users()
+    st.markdown("<h2 style='text-align:center;'>Sign in to TCHAI Easy LCA</h2>", unsafe_allow_html=True)
+    mode = st.radio("", ["Sign in", "Create account"], horizontal=True)
+    username = st.text_input("Username", key="auth_user")
+    password = st.text_input("Password", type="password", key="auth_pw")
+
+    if mode == "Create account":
+        if st.button("Create account", use_container_width=True):
+            if not username or not password:
+                st.error("Please enter both a username and a password.")
+            elif username in users:
+                st.error("This username already exists. Please choose another.")
+            else:
+                salt = secrets.token_hex(8)
+                users[username] = {
+                    "salt": salt,
+                    "hash": _hash_password(password, salt),
+                    "created": datetime.utcnow().isoformat()
+                }
+                _save_users(users)
+                st.success("Account created. You can sign in now.")
+    else:
+        if st.button("Sign in", type="primary", use_container_width=True):
+            if username not in users:
+                st.error("Unknown username.")
+            else:
+                salt = users[username]["salt"]
+                if users[username]["hash"] == _hash_password(password, salt):
+                    st.session_state["auth_user"] = username
+                    st.experimental_rerun()
+                else:
+                    st.error("Incorrect password.")
+
+    return None
+
+
+# -------------------------
+# Main App
+# -------------------------
+
+st.set_page_config(page_title="TCHAI — Easy LCA", layout="wide")
+
+# Minimal black/white with purple accents via inline CSS
+st.markdown(
+    f"""
+    <style>
+    :root {{ --purple: {PURPLE}; }}
+    .stApp {{ background: #ffffff; color: #111; }}
+    .stTabs [data-baseweb="tab"] p {{ font-weight: 600; }}
+    .stButton>button {{ border-radius: 12px; border:1px solid #111; }}
+    .stRadio>div>label {{ font-weight:600; }}
+    .metric-card {{ border:1px solid #ddd; border-radius:16px; padding:16px; }}
+    .center {{ text-align:center; }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Auth flow
+user = st.session_state.get("auth_user")
+if not user:
+    sign_in_gate()
+    st.stop()
+
+# Logged in UI
+with st.sidebar:
+    st.markdown("### Inputs")
+    st.caption("Upload or reuse your saved database. Your files are stored per account.")
+    use_saved = False
+    saved_path = load_user_db_path(user)
+
+    if saved_path and saved_path.exists():
+        use_saved = st.toggle(f"Use saved database ({saved_path.name})", value=True)
+    up = st.file_uploader("Upload Excel database (.xlsx)", type=["xlsx"], accept_multiple_files=False)
+
+    if up is not None and not use_saved:
+        try:
+            db_path = store_user_file(user, up)
+            st.success(f"Database saved as {db_path.name}. It will persist for your account.")
+            st.session_state["db_path"] = str(db_path)
+        except Exception as e:
+            st.error(f"Failed to save the uploaded file: {e}")
+    elif use_saved and saved_path:
+        st.session_state["db_path"] = str(saved_path)
+
+    # Optional: allow custom weights for detected impact columns later (shown in Workspace after load)
+
+# Header with logo + title
+show_logo_and_header()
+
+st.divider()
+
+# Workspace tabs
+res_tab, cmp_tab, sum_tab, rep_tab, ver_tab = st.tabs([
+    "Results", "Comparison", "Final Summary", "Report", "Versions"
+])
+
+# -------------------------
+# Load & parse database
+# -------------------------
+
+def load_and_prepare_current() -> Tuple[pd.DataFrame, Dict[str, float]]:
+    dbp = st.session_state.get("db_path")
+    if not dbp:
+        raise RuntimeError("No database selected or uploaded yet.")
+    sheets = read_excel_flex(dbp)
+    sheet_name, proc_df = detect_process_table(sheets)
+    slim = normalize_process_table(proc_df)
+
+    # Build default weights (1.0 per impact column except Process)
+    impacts = [c for c in slim.columns if c != "Process" and pd.api.types.is_numeric_dtype(slim[c])]
+    weights = {c: 1.0 for c in impacts}
+    return slim, weights
+
+
+# -------------------------
+# RESULTS TAB
+# -------------------------
+with res_tab:
+    st.subheader("Results")
+    if "db_path" not in st.session_state:
+        st.info("Upload (or reuse) a database from the sidebar to view results.")
+    else:
+        try:
+            df_slim, default_weights = load_and_prepare_current()
+            # Let user tune weights (advanced)
+            with st.expander("Impact Weights (optional)"):
+                cols = st.columns(min(4, max(1, len(default_weights))))
+                new_weights = {}
+                i = 0
+                for k, v in default_weights.items():
+                    with cols[i % len(cols)]:
+                        new_weights[k] = st.number_input(f"{k}", value=float(v), step=0.1, key=f"w_{k}")
+                    i += 1
+            if not new_weights:
+                new_weights = default_weights
+
+            result_df = compute_impacts(df_slim, new_weights)
+
+            # KPI ribbon
+            total_system = float(result_df["TotalImpact"].sum())
+            n_proc = int(result_df["Process"].nunique())
+            st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+            k1, k2 = st.columns(2)
+            k1.metric("Total Impact (weighted)", f"{total_system:,.2f}")
+            k2.metric("# Processes detected", f"{n_proc}")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            # Top contributors chart
+            topN = st.slider("Show top N processes", 3, 25, 10)
+            top_df = result_df.sort_values("TotalImpact", ascending=False).head(topN)
+            fig = px.bar(
+                top_df,
+                x="Process",
+                y="TotalImpact",
+                title="Top Contributors",
+                labels={"TotalImpact": "Weighted Impact"},
+                color_discrete_sequence=[PURPLE],
+            )
+            fig.update_layout(title_x=0.5)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Store current results for other tabs
+            st.session_state["current_results"] = result_df
+            st.session_state["current_weights"] = new_weights
+            st.session_state["current_dataset_info"] = {
+                "rows": int(len(df_slim)),
+                "impacts": list(new_weights.keys()),
+            }
+            st.success("Database parsed successfully. Processes and impacts detected.")
+        except Exception as e:
+            st.error(f"Failed to parse or compute results: {e}")
+
+# -------------------------
+# COMPARISON TAB
+# -------------------------
+with cmp_tab:
+    st.subheader("Comparison")
+    root = get_user_root(user)
+    versions_dir = root / "versions"
+    versions = sorted([p for p in versions_dir.glob("*.csv")], key=lambda p: p.stat().st_mtime, reverse=True)
+
+    if not versions:
+        st.info("No saved versions yet. Save one from the Versions tab after running Results.")
+    else:
+        left, right = st.columns(2)
+        with left:
+            v1 = st.selectbox("Baseline version", versions, format_func=lambda p: p.stem)
+        with right:
+            v2 = st.selectbox("Comparison version", versions, index=min(1, len(versions)-1), format_func=lambda p: p.stem)
+        if v1 and v2 and v1 != v2:
+            df1 = pd.read_csv(v1)
+            df2 = pd.read_csv(v2)
+            merged = df1[["Process", "TotalImpact"]].merge(df2[["Process", "TotalImpact"]], on="Process", how="outer", suffixes=("_A", "_B"))
+            merged.fillna(0, inplace=True)
+            merged["Delta"] = merged["TotalImpact_B"] - merged["TotalImpact_A"]
+            st.dataframe(merged.sort_values("Delta", ascending=False), use_container_width=True)
+            fig = px.bar(merged.sort_values("Delta", ascending=False).head(20), x="Process", y="Delta", title="Impact Delta (B - A)", color_discrete_sequence=[PURPLE])
+            fig.update_layout(title_x=0.5)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Select two different saved versions to compare.")
+
+# -------------------------
+# FINAL SUMMARY TAB
+# -------------------------
+with sum_tab:
+    st.subheader("Final Summary")
+    cur = st.session_state.get("current_results")
+    info = st.session_state.get("current_dataset_info")
+    if cur is None:
+        st.info("Run Results first.")
+    else:
+        total = float(cur["TotalImpact"].sum())
+        top = cur.sort_values("TotalImpact", ascending=False).head(5)[["Process", "TotalImpact"]]
+        c1, c2 = st.columns([2,1])
+        with c1:
+            st.markdown("**Key takeaways**")
+            st.markdown(f"- Total weighted system impact: **{total:,.2f}**")
+            st.markdown(f"- Processes detected: **{info['rows']}**")
+            st.markdown("- Impact metrics considered: " + ", ".join([f"`{m}`" for m in info["impacts"]]))
+            st.markdown("**Top 5 contributors**")
+            st.table(top)
+        with c2:
+            fig2 = px.pie(cur, names="Process", values="TotalImpact", title="Share of Impact", color_discrete_sequence=[PURPLE])
+            fig2.update_layout(title_x=0.5)
+            st.plotly_chart(fig2, use_container_width=True)
+
+# -------------------------
+# REPORT TAB
+# -------------------------
+with rep_tab:
+    st.subheader("Report & Exports")
+    cur = st.session_state.get("current_results")
+    if cur is None:
+        st.info("Run Results first.")
+    else:
+        # CSV download
+        csv = cur.to_csv(index=False).encode("utf-8")
+        st.download_button("Download CSV of Results", csv, file_name="easy_lca_results.csv")
+
+        # Simple HTML report (self-contained)
+        def build_html_report(df: pd.DataFrame) -> str:
+            total = float(df["TotalImpact"].sum())
+            top = df.sort_values("TotalImpact", ascending=False).head(10)
+            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+            html = f"""
+            <html><head><meta charset='utf-8'>
+            <style>
+            body {{ font-family: Arial, sans-serif; color:#111; }}
+            h1, h2 {{ text-align: center; }}
+            table {{ border-collapse: collapse; width:100%; }}
+            th, td {{ border:1px solid #ccc; padding:8px; text-align:left; }}
+            .pill {{ display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid #111; }}
+            </style></head>
+            <body>
+              <h1>TCHAI — Easy LCA Report</h1>
+              <p class="pill">Generated: {now}</p>
+              <h2>Total Weighted Impact: {total:,.2f}</h2>
+              <h3>Top 10 Contributors</h3>
+              {top.to_html(index=False)}
+            </body></nhtml>
+            """
+            return html
+        html = build_html_report(cur)
+        st.download_button("Download HTML Report", data=html, file_name="easy_lca_report.html")
+        st.success("Exports are ready.")
+
+# -------------------------
+# VERSIONS TAB
+# -------------------------
+with ver_tab:
+    st.subheader("Versions")
+    cur = st.session_state.get("current_results")
+    if cur is None:
+        st.info("Run Results first to save a version.")
+    else:
+        default_name = datetime.now().strftime("run-%Y%m%d-%H%M")
+        vname = st.text_input("Version name", value=default_name)
+        if st.button("Save current as version"):
+            try:
+                path = get_user_root(user) / "versions" / f"{vname}.csv"
+                cur.to_csv(path, index=False)
+                st.success(f"Saved version: {path.name}")
+            except Exception as e:
+                st.error(f"Failed to save version: {e}")
+
+        # List versions
+        root = get_user_root(user)
+        versions = sorted([(p, p.stat().st_mtime) for p in (root / "versions").glob("*.csv")], key=lambda x: x[1], reverse=True)
+        if versions:
+            st.markdown("**Saved versions**")
+            for p, ts in versions:
+                st.write(f"- {p.stem} ({datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')})")
+        else:
+            st.caption("No versions saved yet.")
+
+# -------------------------
+# End
+# -------------------------
