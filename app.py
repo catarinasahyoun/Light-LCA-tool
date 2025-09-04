@@ -1,396 +1,750 @@
-# TCHAI — Easy LCA Indicator
-
+# app.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import json, os, hashlib, secrets
-from pathlib import Path
+import json, re, base64, hashlib, secrets
 from datetime import datetime
+from pathlib import Path
+from typing import Optional
 
-# ------------------------ Paths & Folders ---------------------
-APP_DIR = Path.cwd()
-ASSETS = APP_DIR / "assets"
-DATA_DIR = APP_DIR / "user_data"
+# =============================================================
+# TCHAI — Easy LCA Indicator (full app, robust Inputs)
+# - Front-page Sign-in (no self-signup) with 3 pre-created users:
+#   sustainability@tchai.nl / ChangeMe123!
+#   jillderegt@tchai.nl     / ChangeMe123!
+#   veravanbeaumont@tchai.nl/ ChangeMe123!
+# - Avatar menu: change password + sign out
+# - Sidebar: only the TCHAI logo + navigation (Inputs, Workspace, Settings)
+# - Inputs: robust sheet detection, tolerant column parsing, preview, session override upload
+# - Workspace tabs: Results, Comparison (purple), Final Summary, Report (HTML), Versions (save/load/delete)
+# - Settings: Database Manager (upload .xlsx, list, activate)
+# - B&W UI, purple charts; safe folder creation; st.rerun compatibility
+# =============================================================
 
-# Ensure ASSETS is a directory even if a file named 'assets' exists
-if ASSETS.exists() and not ASSETS.is_dir():
-    ASSETS = APP_DIR / "assets_dir"
-ASSETS.mkdir(parents=True, exist_ok=True)
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+st.set_page_config(
+    page_title="TCHAI — Easy LCA Indicator",
+    page_icon="🌿",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# -----------------------------
+# Assets (robust) + Users + DB paths
+# -----------------------------
+def ensure_dir(p: Path):
+    """Ensure 'p' is a directory; if a file blocks the path, rename it and create the dir."""
+    if p.exists() and not p.is_dir():
+        backup = p.with_name(f"{p.name}_conflict_{datetime.now().strftime('%Y%m%d%H%M%S')}")
+        p.rename(backup)
+    p.mkdir(parents=True, exist_ok=True)
+
+ASSETS = Path("assets")
+ensure_dir(ASSETS)
+
+DB_ROOT = ASSETS / "databases"
+ensure_dir(DB_ROOT)
 
 USERS_FILE = ASSETS / "users.json"
-DEFAULT_LOGO = ASSETS / "tchai_logo.png"
+ACTIVE_DB_FILE = DB_ROOT / "active.json"  # stores {"path": "<active .xlsx>"}
 
-# ------------------------ Utilities ---------------------------
-BRAND_PURPLE = ["#6B2FB3"]
+# -----------------------------
+# Rerun helper (compat)
+# -----------------------------
+def _rerun():
+    if hasattr(st, "rerun"):
+        st.rerun()
+    else:  # pragma: no cover
+        try:
+            st.experimental_rerun()
+        except Exception:
+            pass
 
-@st.cache_data(show_spinner=False)
-def _now_str():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+# -----------------------------
+# Branding (logo)
+# -----------------------------
+LOGO_PATHS = [ASSETS / "tchai_logo.png", Path("tchai_logo.png")]
+_logo_bytes = None
+for p in LOGO_PATHS:
+    if p.exists():
+        _logo_bytes = p.read_bytes()
+        break
 
-def read_json(path: Path, default):
-    try:
-        if path.exists():
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return default
+def logo_tag(height=86):
+    if not _logo_bytes:
+        return "<span style='font-weight:900;font-size:28px'>TCHAI</span>"
+    b64 = base64.b64encode(_logo_bytes).decode()
+    return f"<img src='data:image/png;base64,{b64}' alt='TCHAI' style='height:{height}px'/>"
 
-def write_json(path: Path, data: dict):
-    tmp = path.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    tmp.replace(path)
+# -----------------------------
+# Theme (B&W + purple charts)
+# -----------------------------
+PURPLE = ['#5B21B6','#6D28D9','#7C3AED','#8B5CF6','#A78BFA','#C4B5FD']
+st.markdown(
+    """
+    <style>
+      .stApp { background:#fff; color:#000; }
+      .metric { border:1px solid #111; border-radius:12px; padding:14px; text-align:center; }
+      .brand-title { font-weight:900; font-size:26px; text-align:center; }
+      .nav-note { color:#6b7280; font-size:12px; }
+      .avatar { width:36px; height:36px; border-radius:9999px; background:#111; color:#fff;
+                display:flex; align-items:center; justify-content:center; font-weight:800; }
+      .stSelectbox div[data-baseweb="select"],
+      .stNumberInput input,
+      .stTextInput input,
+      .stTextArea textarea { border:1px solid #111; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-# ------------------------ Auth --------------------------------
-
-def _hash_password(password: str, salt: str) -> str:
-    return hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-
+# -----------------------------
+# Auth helpers & bootstrap (3 users)
+# -----------------------------
 def _load_users() -> dict:
-    return read_json(USERS_FILE, {})
+    try:
+        return json.loads(USERS_FILE.read_text())
+    except Exception:
+        return {}
 
 def _save_users(users: dict):
-    write_json(USERS_FILE, users)
+    USERS_FILE.write_text(json.dumps(users, indent=2))
 
-def create_account(username: str, password: str):
+def _hash(pw: str, salt: str) -> str:
+    return hashlib.sha256((salt + pw).encode()).hexdigest()
+
+def _initials(name: str) -> str:
+    parts = [p for p in re.split(r"\s+|_+|\.+|@", name) if p]
+    return ((parts[0][0] if parts else "U") + (parts[1][0] if len(parts) > 1 else "")).upper()
+
+def bootstrap_users_if_needed():
     users = _load_users()
-    if username in users:
-        return False, "Username already exists."
-    if len(password) < 6:
-        return False, "Password must be at least 6 characters."
-    salt = secrets.token_hex(16)
-    users[username] = {
-        "salt": salt,
-        "pwd": _hash_password(password, salt),
-        "db_path": None,
-        "logo_path": None,
-        "created_at": _now_str(),
-        "last_login": None,
-    }
-    _save_users(users)
-    return True, "Account created. Please sign in."
+    if users:
+        return
+    default_pw = "ChangeMe123!"
+    emails = [
+        "sustainability@tchai.nl",
+        "jillderegt@tchai.nl",
+        "veravanbeaumont@tchai.nl",
+    ]
+    out = {}
+    for email in emails:
+        salt = secrets.token_hex(8)
+        out[email] = {
+            "salt": salt,
+            "hash": _hash(default_pw, salt),
+            "created_at": datetime.now().isoformat()
+        }
+    _save_users(out)
 
-def verify_login(username: str, password: str):
-    users = _load_users()
-    u = users.get(username)
-    if not u:
-        return False, "User not found."
-    ok = _hash_password(password, u["salt"]) == u["pwd"]
-    if ok:
-        u["last_login"] = _now_str()
-        users[username] = u
-        _save_users(users)
-        return True, "Signed in."
-    return False, "Incorrect password."
+bootstrap_users_if_needed()
 
-# --------------------- Database handling ----------------------
+if "auth_user" not in st.session_state:
+    st.session_state.auth_user = None
 
-@st.cache_data(show_spinner=False)
-def _read_excel(path: str) -> dict:
-    """Return a dict of DataFrames keyed by sheet name."""
-    xls = pd.ExcelFile(path)
-    frames = {}
-    for sheet in xls.sheet_names:
+# -----------------------------
+# Sidebar (logo only + nav)
+# -----------------------------
+with st.sidebar:
+    st.markdown(f"<div style='display:flex;justify-content:center;margin-bottom:10px'>{logo_tag(64)}</div>",
+                unsafe_allow_html=True)
+    if st.session_state.auth_user:
+        page = st.radio("Navigate", ["Inputs", "Workspace", "Settings"], index=0)
+        st.markdown("<div class='nav-note'>Inputs are separate. Workspace contains Results, Comparison, Final Summary, Report & Versions.</div>",
+                    unsafe_allow_html=True)
+    else:
+        page = "Sign in"
+
+# -----------------------------
+# Header (big TCHAI left, title center, avatar right)
+# -----------------------------
+cl, cm, cr = st.columns([0.18, 0.64, 0.18])
+with cl:
+    st.markdown(f"{logo_tag(86)}", unsafe_allow_html=True)
+with cm:
+    st.markdown("<div class='brand-title'>Easy LCA Indicator</div>", unsafe_allow_html=True)
+with cr:
+    if st.session_state.auth_user:
+        initials = _initials(st.session_state.auth_user)
+        if hasattr(st, "popover"):
+            with st.popover(f"👤 {initials}"):
+                st.write(f"Signed in as **{st.session_state.auth_user}**")
+                st.markdown("---")
+                st.subheader("Account settings")
+                with st.form("change_pw_form", clear_on_submit=True):
+                    cur = st.text_input("Current password", type="password")
+                    new = st.text_input("New password", type="password")
+                    conf = st.text_input("Confirm new password", type="password")
+                    submitted = st.form_submit_button("Change password")
+                if submitted:
+                    users = _load_users()
+                    rec = users.get(st.session_state.auth_user)
+                    if not rec or _hash(cur, rec["salt"]) != rec["hash"]:
+                        st.error("Current password is incorrect.")
+                    elif not new or new != conf:
+                        st.error("New passwords don't match.")
+                    else:
+                        salt = secrets.token_hex(8)
+                        rec["salt"] = salt
+                        rec["hash"] = _hash(new, salt)
+                        users[st.session_state.auth_user] = rec
+                        _save_users(users)
+                        st.success("Password changed.")
+                st.markdown("---")
+                if st.button("Sign out"):
+                    st.session_state.auth_user = None
+                    _rerun()
+        else:
+            st.markdown(f"<div class='avatar'>{initials}</div>", unsafe_allow_html=True)
+            if st.button("Sign out"):
+                st.session_state.auth_user = None
+                _rerun()
+
+# -----------------------------
+# Front-page Sign-in (hard gate)
+# -----------------------------
+if not st.session_state.auth_user:
+    st.markdown("### Sign in to continue")
+    t1, t2 = st.columns([0.55, 0.45])
+    with t1:
+        st.markdown("Use your TCHAI account email and password.")
+        u = st.text_input("Email", key="login_u", placeholder="you@tchai.nl")
+        p = st.text_input("Password", type="password", key="login_p")
+        if st.button("Sign in"):
+            users = _load_users()
+            rec = users.get(u)
+            if not rec:
+                st.error("Unknown user.")
+            elif _hash(p, rec["salt"]) != rec["hash"]:
+                st.error("Wrong password.")
+            else:
+                st.session_state.auth_user = u
+                st.success("Welcome!")
+                _rerun()
+    with t2:
+        st.markdown("#### Need changes?")
+        st.caption("User creation is disabled. Ask an admin to add a new account.")
+    st.stop()
+
+# =============================
+# From here on, user is authenticated
+# =============================
+
+# -----------------------------
+# Database management (robust)
+# -----------------------------
+def list_databases():
+    return sorted((ASSETS / "databases").glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+def set_active_database(path: Path):
+    ACTIVE_DB_FILE.write_text(json.dumps({"path": str(path)}))
+    st.success(f"Activated database: {path.name}")
+    _rerun()
+
+def get_active_database_path() -> Optional[Path]:
+    # 1) explicit active.json
+    if ACTIVE_DB_FILE.exists():
         try:
-            df = pd.read_excel(xls, sheet_name=sheet)
-            if df is not None and not df.empty:
-                # Normalize column names
-                df.columns = [str(c).strip() for c in df.columns]
-                frames[sheet.strip()] = df
+            data = json.loads(ACTIVE_DB_FILE.read_text())
+            p = Path(data.get("path", ""))
+            if p.exists():
+                return p
         except Exception:
-            continue
-    return frames
-
-@st.cache_data(show_spinner=False)
-def _detect_processes(frames: dict):
-    """Pick the Processes sheet if present; otherwise pick first with numeric cols."""
-    if not frames:
-        return None
-    # Prefer sheet called 'Processes' (case-insensitive)
-    for k in frames:
-        if k.lower() == "processes":
-            return frames[k]
-    # Otherwise choose the first sheet that has at least 1 numeric column
-    for k, df in frames.items():
-        if any(pd.api.types.is_numeric_dtype(df[c]) for c in df.columns):
-            return df
-    # Fallback: first sheet
-    first = next(iter(frames.values()))
-    return first
-
-@st.cache_data(show_spinner=False)
-def _detect_materials(frames: dict):
-    for k in frames:
-        if k.lower() == "materials":
-            return frames[k]
+            pass
+    # 2) newest uploaded in assets/databases/
+    dbs = list_databases()
+    if dbs:
+        return dbs[0]
+    # 3) bundled fallbacks
+    for candidate in [ASSETS / "Refined database.xlsx",
+                      Path("Refined database.xlsx"),
+                      Path("database.xlsx")]:
+        if candidate.exists():
+            return candidate
     return None
 
-# --------------------- UI Helpers -----------------------------
+def load_active_excel() -> Optional[pd.ExcelFile]:
+    p = get_active_database_path()
+    if p and p.exists():
+        try:
+            return pd.ExcelFile(str(p))
+        except Exception as e:
+            st.error(f"Failed to open Excel: {p.name} — {e}")
+            return None
+    return None
 
-def header():
-    with st.container():
-        cols = st.columns([1, 6, 1])
-        with cols[0]:
-            # Prioritize user logo if set, else default
-            logo_path = DEFAULT_LOGO
-            if st.session_state.get("user_logo") and Path(st.session_state["user_logo"]).exists():
-                logo_path = Path(st.session_state["user_logo"]) 
-            if logo_path.exists():
-                st.image(str(logo_path), use_column_width=True)
-        with cols[1]:
-            st.markdown("""
-                <div style='text-align:center; margin-top:6px;'>
-                    <h1 style='margin: 0; font-weight:800;'>TCHAI — Easy LCA Indicator</h1>
-                    <p style='margin: 0; color:#333;'>Black & White UI · Purple Charts</p>
-                </div>
-            """, unsafe_allow_html=True)
-        with cols[2]:
-            if st.session_state.get("username"):
-                st.caption(f"Signed in as **{st.session_state['username']}**")
+# -----------------------------
+# Parsing helpers (tolerant)
+# -----------------------------
+def extract_number(v):
+    try:
+        return float(v)
+    except Exception:
+        s = str(v).replace(',', '.')
+        m = re.search(r"[-+]?\d*\.?\d+", s)
+        return float(m.group()) if m else 0.0
 
-def sidebar():
-    st.sidebar.markdown("### Navigation")
-    page = st.sidebar.radio("Go to", ["Home", "Database", "Visualize", "Report", "Settings"], index=0)
-    st.session_state["page"] = page
+def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [re.sub(r"\s+", " ", str(c).strip()).lower() for c in df.columns]
+    return df
 
-    st.sidebar.markdown("---")
-    if st.session_state.get("username"):
-        if st.sidebar.button("Sign out"):
-            for k in ["username", "db_frames", "db_path", "user_logo"]:
-                st.session_state.pop(k, None)
-            st.experimental_rerun()
-    else:
-        st.sidebar.info("Create an account or sign in to start.")
+def _find_sheet(xls: pd.ExcelFile, target: str) -> Optional[str]:
+    names = xls.sheet_names
+    # exact
+    for n in names:
+        if n == target:
+            return n
+    # trimmed / case-insensitive
+    t = re.sub(r"\s+", "", target.lower())
+    for n in names:
+        if re.sub(r"\s+", "", n.lower()) == t:
+            return n
+    # partial
+    for n in names:
+        if target.lower() in n.lower():
+            return n
+    return None
 
-def auth_box():
-    st.subheader("Account")
-    tabs = st.tabs(["Sign in", "Create account"])
-    with tabs[0]:
-        user = st.text_input("Username", key="signin_user")
-        pwd = st.text_input("Password", type="password", key="signin_pwd")
-        if st.button("Sign in"):
-            ok, msg = verify_login(user.strip(), pwd)
-            if ok:
-                st.success(msg)
-                st.session_state["username"] = user.strip()
-                # Load persisted paths
-                users = _load_users()
-                u = users.get(st.session_state["username"], {})
-                # Persist DB
-                if u.get("db_path") and Path(u["db_path"]).exists():
-                    st.session_state["db_path"] = u["db_path"]
-                    frames = _read_excel(u["db_path"])
-                    st.session_state["db_frames"] = frames if frames else None
-                # Persist logo
-                if u.get("logo_path") and Path(u["logo_path"]).exists():
-                    st.session_state["user_logo"] = u["logo_path"]
-                st.experimental_rerun()
-            else:
-                st.error(msg)
-    with tabs[1]:
-        user = st.text_input("New username", key="signup_user")
-        pwd = st.text_input("New password", type="password", key="signup_pwd")
-        if st.button("Create account"):
-            ok, msg = create_account(user.strip(), pwd)
-            (st.success if ok else st.error)(msg)
+def parse_materials(df_raw: pd.DataFrame) -> dict:
+    if df_raw is None or df_raw.empty:
+        return {}
+    df = _normalize_cols(df_raw)
 
-# ---------------------- Pages ---------------------------------
+    def pick(aliases):
+        for a in aliases:
+            if a in df.columns:
+                return a
+        return None
 
-def page_home():
-    st.write("Welcome to the Easy LCA Indicator. Use the sidebar to navigate.")
-    if not st.session_state.get("username"):
-        with st.expander("Sign in to get started"):
-            auth_box()
+    col_name = pick(["material name","material","name"])
+    col_co2  = pick(["co2e (kg)","co2e/kg","co2e","co2e per kg","co2 (kg)","emission factor"])
+    col_rc   = pick(["recycled content","recycled content (%)","recycled","recycled %"])
+    col_eol  = pick(["eol","end of life"])
+    col_life = pick(["lifetime","life","lifespan","lifetime (years)"])
+    col_circ = pick(["circularity","circ"])
 
-def _save_user_db(uploaded):
-    users = _load_users()
-    user = st.session_state.get("username")
-    if not user:
-        st.error("Please sign in first.")
-        return False
-    user_dir = DATA_DIR / hashlib.sha256(user.encode()).hexdigest()[:16]
-    user_dir.mkdir(parents=True, exist_ok=True)
-    db_path = user_dir / "database.xlsx"
-    with open(db_path, "wb") as f:
-        f.write(uploaded.getbuffer())
-    users[user]["db_path"] = str(db_path)
-    _save_users(users)
-    st.session_state["db_path"] = str(db_path)
-    st.session_state["db_frames"] = _read_excel(str(db_path))
-    return True
+    if not col_name or not col_co2:
+        return {}
 
-def page_database():
-    st.subheader("Your LCA Database")
+    out = {}
+    for _, r in df.iterrows():
+        name = (str(r[col_name]).strip() if pd.notna(r[col_name]) else "")
+        if not name:
+            continue
+        out[name] = {
+            "CO₂e (kg)": extract_number(r[col_co2]) if pd.notna(r[col_co2]) else 0.0,
+            "Recycled Content": extract_number(r[col_rc]) if col_rc and pd.notna(r.get(col_rc, None)) else 0.0,
+            "EoL": str(r[col_eol]).strip() if col_eol and pd.notna(r.get(col_eol, None)) else "Unknown",
+            "Lifetime": str(r[col_life]).strip() if col_life and pd.notna(r.get(col_life, None)) else "Unknown",
+            "Circularity": str(r[col_circ]).strip() if col_circ and pd.notna(r.get(col_circ, None)) else "Unknown",
+        }
+    return out
 
-    if not st.session_state.get("username"):
-        st.info("Please sign in to upload and persist your database.")
-        auth_box()
-        return
+def parse_processes(df_raw: pd.DataFrame) -> dict:
+    if df_raw is None or df_raw.empty:
+        return {}
+    df = _normalize_cols(df_raw)
 
-    st.write("Upload a single Excel file containing your **Processes** and (optionally) **Materials** sheets. The app will use the processes from this same file.")
+    def pick(aliases):
+        for a in aliases:
+            if a in df.columns:
+                return a
+        return None
 
-    up = st.file_uploader("Upload Excel (.xlsx)", type=["xlsx"], accept_multiple_files=False)
-    if up is not None:
-        if _save_user_db(up):
-            st.success("Database saved to your account. (No preview is shown by design.)")
+    col_proc = pick(["process","step","operation"])
+    col_co2  = pick(["co2e","co2e (kg)","co2","emission","factor"])
+    col_unit = pick(["unit","uom"])
 
-    # Show current status without preview
-    db_path = st.session_state.get("db_path")
-    if db_path and Path(db_path).exists():
-        frames = st.session_state.get("db_frames") or _read_excel(db_path)
-        st.session_state["db_frames"] = frames
-        proc = _detect_processes(frames)
-        mats = _detect_materials(frames)
-        bullets = []
-        bullets.append(f"File: **{Path(db_path).name}**")
-        bullets.append(f"Sheets loaded: **{', '.join(frames.keys())}**")
-        bullets.append(f"Processes sheet used: **{[k for k in frames if frames[k] is proc][0]}**")
-        if mats is not None:
-            bullets.append("Materials sheet detected: **yes**")
+    if not col_proc or not col_co2:
+        return {}
+
+    out = {}
+    for _, r in df.iterrows():
+        name = (str(r[col_proc]).strip() if pd.notna(r[col_proc]) else "")
+        if not name:
+            continue
+        out[name] = {
+            "CO₂e": extract_number(r[col_co2]) if pd.notna(r[col_co2]) else 0.0,
+            "Unit": str(r[col_unit]).strip() if col_unit and pd.notna(r.get(col_unit, None)) else "",
+        }
+    return out
+
+# -----------------------------
+# Session storage
+# -----------------------------
+if "materials" not in st.session_state: st.session_state.materials = {}
+if "processes" not in st.session_state: st.session_state.processes = {}
+if "assessment" not in st.session_state:
+    st.session_state.assessment = {
+        "lifetime_weeks": 52,
+        "selected_materials": [],
+        "material_masses": {},
+        "processing_data": {}
+    }
+
+# -----------------------------
+# Inputs (status + tolerant parsing + override uploader)
+# -----------------------------
+if page == "Inputs":
+    # Show current active DB + optional session override
+    active_path = get_active_database_path()
+    st.subheader("Database status")
+    c0, c1 = st.columns([0.6, 0.4])
+    with c0:
+        if active_path:
+            st.success(f"Active database: **{active_path.name}**")
         else:
-            bullets.append("Materials sheet detected: **no**")
-        st.markdown("\n".join(["- "+b for b in bullets]))
+            st.error("No active database found.")
+    with c1:
+        st.caption("Quick override (optional)")
+        override = st.file_uploader("Use a different Excel for this session", type=["xlsx"], key="override_db")
+
+    # Decide which Excel to load
+    if override is not None:
+        try:
+            xls = pd.ExcelFile(override)
+            st.info("Using the uploaded override Excel for this session.")
+        except Exception as e:
+            st.error(f"Could not open the uploaded Excel: {e}")
+            st.stop()
     else:
-        st.info("No database on file yet.")
+        xls = load_active_excel()
 
-def page_visualize():
-    st.subheader("Visualize Impacts")
-    if not st.session_state.get("db_frames"):
-        st.warning("Upload your database first (see Database page).")
-        return
+    if not xls:
+        st.error("No Excel could be opened. Go to Settings → Database Manager and upload/activate one, or use the override above.")
+        st.stop()
 
-    frames = st.session_state["db_frames"]
-    proc = _detect_processes(frames)
-    if proc is None or proc.empty:
-        st.error("No processes table found or it's empty.")
-        return
+    # Sheet detection + manual choice
+    auto_mat = _find_sheet(xls, "Materials")
+    auto_proc = _find_sheet(xls, "Processes")
 
-    # Let user pick label and value columns dynamically
-    cols = list(proc.columns)
-    text_cols = [c for c in cols if not pd.api.types.is_numeric_dtype(proc[c])]
-    num_cols  = [c for c in cols if pd.api.types.is_numeric_dtype(proc[c])]
+    c2, c3 = st.columns(2)
+    with c2:
+        st.caption("Sheets in workbook")
+        st.write(", ".join(xls.sheet_names))
+        mat_choice = st.selectbox("Materials sheet", options=xls.sheet_names,
+                                  index=(xls.sheet_names.index(auto_mat) if auto_mat in xls.sheet_names else 0))
+        proc_choice = st.selectbox("Processes sheet", options=xls.sheet_names,
+                                   index=(xls.sheet_names.index(auto_proc) if auto_proc in xls.sheet_names else 0))
+    with c3:
+        st.caption(f"Preview of '{mat_choice}' (first 5 rows)")
+        try:
+            st.dataframe(pd.read_excel(xls, sheet_name=mat_choice).head(5), use_container_width=True)
+        except Exception as e:
+            st.warning(f"Preview error: {e}")
 
-    if not num_cols:
-        st.error("No numeric columns found to chart.")
-        return
+    # Parse selected sheets
+    try:
+        mats_df = pd.read_excel(xls, sheet_name=mat_choice)
+        procs_df = pd.read_excel(xls, sheet_name=proc_choice)
+        st.session_state.materials = parse_materials(mats_df)
+        st.session_state.processes = parse_processes(procs_df)
+    except Exception as e:
+        st.error(f"Could not read the selected sheets: {e}")
+        st.stop()
 
-    label_col = st.selectbox("Label column (x)", options=text_cols or cols, index=0)
-    value_col = st.selectbox("Value column (y)", options=num_cols, index=0)
+    parsed_count = len(st.session_state.materials or {})
+    st.info(f"Parsed **{parsed_count}** materials from '{mat_choice}'.")
+    if parsed_count == 0:
+        st.warning("No materials parsed. Please check your column names. "
+                   "Accepted aliases include: Material name/material/name, CO2e (kg)/CO2e, Recycled Content, EoL, Lifetime, Circularity.")
+        st.stop()
 
-    df_plot = proc[[label_col, value_col]].dropna()
-    if df_plot.empty:
-        st.info("Nothing to chart with current selection.")
-        return
-
-    fig = px.bar(df_plot, x=label_col, y=value_col, title=f"{value_col} by {label_col}", color_discrete_sequence=BRAND_PURPLE)
-    fig.update_layout(
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        title_x=0.5,
-        font=dict(color="#111"),
-        xaxis=dict(showgrid=True, gridcolor="#eee"),
-        yaxis=dict(showgrid=True, gridcolor="#eee"),
+    # Lifetime + Materials UI
+    st.subheader("Lifetime (weeks)")
+    st.session_state.assessment["lifetime_weeks"] = st.number_input(
+        "", min_value=1, value=int(st.session_state.assessment.get("lifetime_weeks", 52))
     )
-    st.plotly_chart(fig, use_container_width=True)
 
-def _build_report_html(frames: dict) -> str:
-    proc = _detect_processes(frames)
-    mats = _detect_materials(frames)
-    n_proc = 0 if proc is None else len(proc)
-    n_mats = 0 if mats is None else len(mats)
-    return f"""
-<!DOCTYPE html>
-<html><head><meta charset='utf-8'><title>TCHAI LCA Report</title>
-<style>
-body {{ font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial; color:#111; }}
-h1, h2 {{ text-align:center; }}
-.badge {{ display:inline-block; padding:4px 10px; border:1px solid #000; border-radius:999px; }}
-hr {{ border:0; border-top:1px solid #000; }}
-</style></head>
-<body>
-    <h1>TCHAI — Easy LCA Indicator</h1>
-    <p style='text-align:center;'>Generated: {_now_str()}</p>
-    <div style='text-align:center;margin:12px 0;'>
-        <span class='badge'>Black & White UI</span>
-        <span class='badge'>Purple Charts</span>
-    </div>
-    <hr/>
-    <h2>Database Summary</h2>
-    <ul>
-        <li>Sheets: {', '.join(frames.keys())}</li>
-        <li>Processes rows: {n_proc}</li>
-        <li>Materials rows: {n_mats}</li>
-    </ul>
-</body></html>
-"""
+    st.subheader("Materials & processes")
+    mats = list(st.session_state.materials.keys())
+    st.session_state.assessment["selected_materials"] = st.multiselect(
+        "Select materials", options=mats, 
+        default=st.session_state.assessment.get("selected_materials", [])
+    )
 
-def page_report():
-    st.subheader("Report & Exports")
-    if not st.session_state.get("db_frames"):
-        st.warning("Upload your database first (see Database page).")
-        return
+    if not st.session_state.assessment["selected_materials"]:
+        st.info("Select at least one material to proceed.")
+        st.stop()
 
-    frames = st.session_state["db_frames"]
+    for m in st.session_state.assessment["selected_materials"]:
+        st.markdown(f"### {m}")
+        masses = st.session_state.assessment.setdefault("material_masses", {})
+        procs_data = st.session_state.assessment.setdefault("processing_data", {})
 
-    # HTML report
-    html = _build_report_html(frames)
-    st.download_button("Download HTML Report", data=html.encode("utf-8"), file_name="tchai_lca_report.html", mime="text/html")
+        mass_default = float(masses.get(m, 1.0))
+        masses[m] = st.number_input(f"Mass of {m} (kg)", min_value=0.0, value=mass_default, key=f"mass_{m}")
 
-    # CSV exports (zipped into one if multiple?) — keep simple: offer each sheet
-    for name, df in frames.items():
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button(f"Download '{name}' as CSV", data=csv, file_name=f"{name}.csv", mime="text/csv")
+        props = st.session_state.materials[m]
+        st.caption(f"CO₂e/kg: {props['CO₂e (kg)']} · Recycled %: {props['Recycled Content']} · EoL: {props['EoL']}")
 
-def page_settings():
-    st.subheader("Settings")
-    if not st.session_state.get("username"):
-        st.info("Sign in to customize your logo.")
-        auth_box()
-        return
+        steps = procs_data.setdefault(m, [])
+        n = st.number_input(f"How many processing steps for {m}?", min_value=0, max_value=10, value=len(steps), key=f"steps_{m}")
+        if n < len(steps):
+            steps[:] = steps[:int(n)]
+        else:
+            for _ in range(int(n) - len(steps)):
+                steps.append({"process": "", "amount": 1.0, "co2e_per_unit": 0.0, "unit": ""})
 
-    st.write("Upload a custom logo to override the default TCHAI logo.")
-    up = st.file_uploader("Upload PNG/JPG", type=["png", "jpg", "jpeg"], accept_multiple_files=False)
-    if up is not None:
-        users = _load_users()
-        user = st.session_state["username"]
-        user_dir = DATA_DIR / hashlib.sha256(user.encode()).hexdigest()[:16]
-        user_dir.mkdir(parents=True, exist_ok=True)
-        logo_path = user_dir / "logo.png"
-        with open(logo_path, "wb") as f:
-            f.write(up.getbuffer())
-        users[user]["logo_path"] = str(logo_path)
-        _save_users(users)
-        st.session_state["user_logo"] = str(logo_path)
-        st.success("Logo saved.")
+        for i in range(int(n)):
+            proc = st.selectbox(
+                f"Process #{i+1}", 
+                options=[''] + list(st.session_state.processes.keys()),
+                index=([''] + list(st.session_state.processes.keys())).index(steps[i]['process'])
+                    if steps[i]['process'] in st.session_state.processes else 0,
+                key=f"proc_{m}_{i}"
+            )
+            if proc:
+                pr = st.session_state.processes.get(proc, {})
+                amt = st.number_input(
+                    f"Amount for '{proc}' ({pr.get('Unit','')})", 
+                    min_value=0.0, value=float(steps[i].get('amount', 1.0)), key=f"amt_{m}_{i}"
+                )
+                steps[i] = {"process": proc, "amount": amt, "co2e_per_unit": pr.get('CO₂e', 0.0), "unit": pr.get('Unit', '')}
 
-    # Info about where files live
-    st.caption(f"Assets folder: {ASSETS}")
-    st.caption(f"User data folder: {DATA_DIR}")
+# -----------------------------
+# Compute results (shared)
+# -----------------------------
+def compute_results():
+    data = st.session_state.assessment
+    mats = st.session_state.materials
 
-# ---------------------- App Layout ----------------------------
+    total_material = 0.0
+    total_process  = 0.0
+    total_mass     = 0.0
+    weighted       = 0.0
+    eol            = {}
+    cmp_rows       = []
 
-st.set_page_config(page_title="TCHAI — Easy LCA", layout="wide")
+    circ_map = {"high": 3, "medium": 2, "low": 1, "not circular": 0}
 
-# Header + Nav
-header()
-sidebar()
+    for name in data.get('selected_materials', []):
+        m = mats.get(name, {})
+        mass = float(data.get('material_masses', {}).get(name, 0))
+        total_mass += mass
+        total_material += mass * float(m.get('CO₂e (kg)', 0))
+        weighted += mass * float(m.get('Recycled Content', 0))
+        eol[name] = m.get('EoL', 'Unknown')
 
-# Routing
-page = st.session_state.get("page", "Home")
-if page == "Home":
-    page_home()
-elif page == "Database":
-    page_database()
-elif page == "Visualize":
-    page_visualize()
-elif page == "Report":
-    page_report()
-elif page == "Settings":
-    page_settings()
+        for s in data.get('processing_data', {}).get(name, []):
+            total_process += float(s.get('amount', 0)) * float(s.get('co2e_per_unit', 0))
 
-# Footer
-st.write("\n")
-st.markdown("<hr style='border:1px solid #000' />", unsafe_allow_html=True)
-st.caption("© TCHAI — Easy LCA Indicator. Built with Streamlit.")
+        cmp_rows.append({
+            'Material': name,
+            'CO2e per kg': float(m.get('CO₂e (kg)', 0)),
+            'Recycled Content (%)': float(m.get('Recycled Content', 0)),
+            'Circularity (mapped)': circ_map.get(str(m.get('Circularity','')).strip().lower(), 0),
+            'Circularity (text)': m.get('Circularity', 'Unknown'),
+            'Lifetime (years)': extract_number(m.get('Lifetime', 0)),
+            'Lifetime (text)': m.get('Lifetime', 'Unknown'),
+        })
+
+    overall = total_material + total_process
+    years = max(data.get('lifetime_weeks', 52) / 52, 1e-9)
+
+    return {
+        'total_material_co2': total_material,
+        'total_process_co2': total_process,
+        'overall_co2': overall,
+        'weighted_recycled': (weighted / total_mass if total_mass > 0 else 0.0),
+        'trees_equiv': overall / (22 * years),
+        'total_trees_equiv': overall / 22,
+        'lifetime_years': years,
+        'eol_summary': eol,
+        'comparison': cmp_rows
+    }
+
+# -----------------------------
+# Workspace (tabs)
+# -----------------------------
+if page == "Workspace":
+    if not st.session_state.assessment.get('selected_materials'):
+        st.info("Go to Inputs and add at least one material.")
+        st.stop()
+
+    R = compute_results()
+    tabs = st.tabs(["Results", "Comparison", "Final Summary", "Report", "Versions"])
+
+    # Results
+    with tabs[0]:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total CO₂ (materials)", f"{R['total_material_co2']:.1f} kg")
+        c2.metric("Total CO₂ (processes)", f"{R['total_process_co2']:.1f} kg")
+        c3.metric("Weighted recycled", f"{R['weighted_recycled']:.1f}%")
+
+    # Comparison (purple charts)
+    with tabs[1]:
+        df = pd.DataFrame(R['comparison'])
+        if df.empty:
+            st.info("No data yet.")
+        else:
+            def style(fig):
+                fig.update_layout(plot_bgcolor="#fff", paper_bgcolor="#fff",
+                                  font=dict(color="#000", size=14),
+                                  title_x=0.5, title_font_size=20)
+                return fig
+            c1, c2 = st.columns(2)
+            with c1:
+                fig = px.bar(df, x="Material", y="CO2e per kg", color="Material",
+                             title="CO₂e per kg", color_discrete_sequence=PURPLE)
+                st.plotly_chart(style(fig), use_container_width=True)
+            with c2:
+                fig = px.bar(df, x="Material", y="Recycled Content (%)", color="Material",
+                             title="Recycled Content (%)", color_discrete_sequence=PURPLE)
+                st.plotly_chart(style(fig), use_container_width=True)
+            c3, c4 = st.columns(2)
+            with c3:
+                fig = px.bar(df, x="Material", y="Circularity (mapped)", color="Material",
+                             title="Circularity", color_discrete_sequence=PURPLE)
+                fig.update_yaxes(tickmode='array', tickvals=[0,1,2,3],
+                                 ticktext=['Not Circular','Low','Medium','High'])
+                st.plotly_chart(style(fig), use_container_width=True)
+            with c4:
+                d = df.copy()
+                def life_cat(x):
+                    v = extract_number(x)
+                    return 'Short' if v < 5 else ('Medium' if v <= 15 else 'Long')
+                d['Lifetime Category'] = d['Lifetime (years)'].apply(life_cat)
+                MAP = {"Short":1, "Medium":2, "Long":3}
+                d['Lifetime'] = d['Lifetime Category'].map(MAP)
+                fig = px.bar(d, x="Material", y="Lifetime", color="Material",
+                             title="Lifetime", color_discrete_sequence=PURPLE)
+                fig.update_yaxes(tickmode='array', tickvals=[1,2,3],
+                                 ticktext=['Short','Medium','Long'])
+                st.plotly_chart(style(fig), use_container_width=True)
+
+    # Final Summary
+    with tabs[2]:
+        m1, m2, m3 = st.columns(3)
+        m1.markdown(f"<div class='metric'><div>Total Impact CO₂e</div><h2>{R['overall_co2']:.1f} kg</h2></div>", unsafe_allow_html=True)
+        m2.markdown(f"<div class='metric'><div>Tree Equivalent / year</div><h2>{R['trees_equiv']:.1f}</h2></div>", unsafe_allow_html=True)
+        m3.markdown(f"<div class='metric'><div>Total Trees</div><h2>{R['total_trees_equiv']:.1f}</h2></div>", unsafe_allow_html=True)
+        st.markdown("#### End‑of‑Life Summary")
+        for k, v in R['eol_summary'].items():
+            st.write(f"• **{k}** — {v}")
+
+    # Report (HTML only)
+    with tabs[3]:
+        project = st.text_input("Project name", value="Sample Project")
+        notes = st.text_area("Executive notes")
+        big_logo = logo_tag(100)
+        html = f"""
+        <!doctype html><html><head><meta charset='utf-8'><title>{project} — TCHAI Report</title>
+        <style>
+          body{{font-family:Arial,sans-serif;margin:24px}}
+          header{{display:flex;align-items:center;gap:16px;margin-bottom:10px}}
+          th,td{{border:1px solid #eee;padding:6px 8px}}
+          table{{border-collapse:collapse;width:100%}}
+        </style></head>
+        <body>
+          <header>{big_logo}</header>
+          <h2 style='text-align:center'>Summary</h2>
+          <ul>
+            <li>Total CO₂e: {R['overall_co2']:.2f} kg</li>
+            <li>Weighted recycled: {R['weighted_recycled']:.1f}%</li>
+            <li>Materials: {R['total_material_co2']:.1f} kg · Processes: {R['total_process_co2']:.1f} kg</li>
+            <li>Trees/year: {R['trees_equiv']:.1f} · Total trees: {R['total_trees_equiv']:.1f}</li>
+          </ul>
+          <h3>End‑of‑Life</h3>
+          <ul>{''.join([f"<li><b>{k}</b> — {v}</li>" for k,v in R['eol_summary'].items()])}</ul>
+          <h3>Notes</h3><div>{notes or '—'}</div>
+        </body></html>
+        """
+        st.download_button(
+            "⬇️ Download HTML report",
+            data=html.encode(),
+            file_name=f"TCHAI_Report_{project.replace(' ','_')}.html",
+            mime="text/html"
+        )
+        st.caption("If you prefer PDF only later, we can add server-side HTML→PDF.")
+
+    # Versions
+    with tabs[4]:
+        class VM:
+            def __init__(self, storage_dir: str = "lca_versions"):
+                self.dir = Path(storage_dir); self.dir.mkdir(exist_ok=True)
+                self.meta = self.dir / "lca_versions_metadata.json"
+            def _load(self): 
+                return json.loads(self.meta.read_text()) if self.meta.exists() else {}
+            def _save(self, m): 
+                self.meta.write_text(json.dumps(m, indent=2))
+            def save(self, name, data, desc=""):
+                m = self._load()
+                if not name:
+                    return False, "Enter a name."
+                if name in m:
+                    return False, "Name exists."
+                fp = self.dir / f"{name}.json"
+                payload = {"assessment_data": data, "timestamp": datetime.now().isoformat(), "description": desc}
+                fp.write_text(json.dumps(payload))
+                m[name] = {
+                    "filename": fp.name,
+                    "description": desc,
+                    "created_at": datetime.now().isoformat(),
+                    "materials_count": len(data.get('selected_materials', [])),
+                    "total_co2": data.get('overall_co2', 0)
+                }
+                self._save(m)
+                return True, "Saved."
+            def list(self):
+                return self._load()
+            def load(self, name):
+                m = self._load()
+                if name not in m:
+                    return None, "Not found."
+                fp = self.dir / m[name]["filename"]
+                if not fp.exists():
+                    return None, "File missing."
+                try:
+                    payload = json.loads(fp.read_text())
+                    return payload.get("assessment_data", {}), "Loaded."
+                except Exception as e:
+                    return None, f"Read error: {e}"
+            def delete(self, name):
+                m = self._load()
+                if name not in m:
+                    return False, "Not found."
+                fp = self.dir / m[name]["filename"]
+                if fp.exists():
+                    fp.unlink()
+                del m[name]
+                self._save(m)
+                return True, "Deleted."
+
+        if "vm" not in st.session_state: st.session_state.vm = VM()
+        vm = st.session_state.vm
+
+        t1, t2, t3 = st.tabs(["Save", "Load", "Manage"])
+        with t1:
+            name = st.text_input("Version name")
+            desc = st.text_area("Description (optional)")
+            if st.button("💾 Save"):
+                data = {**st.session_state.assessment}
+                data.update(compute_results())
+                ok, msg = vm.save(name, data, desc)
+                st.success(msg) if ok else st.error(msg)
+
+        with t2:
+            meta = vm.list()
+            if not meta:
+                st.info("No versions saved yet.")
+            else:
+                sel = st.selectbox("Select version", list(meta.keys()))
+                if st.button("📂 Load"):
+                    data, msg = vm.load(sel)
+                    if data:
+                        st.session_state.assessment = data
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+
+        with t3:
+            meta = vm.list()
+            if not meta:
+                st.info("Nothing to
+                st.info("Nothing to manage yet.")
+            else:
+                sel = st.selectbox("Select version to delete", list(meta.keys()))
+                if st.button("🗑️ Delete"):
+                    ok, msg = vm.delete(sel)
+                    st.success(msg) if ok else st.error(msg)
