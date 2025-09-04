@@ -1,63 +1,7 @@
-# -----------------------------
-# Assets (robust) + Users + DB paths
-# -----------------------------
-from pathlib import Path
-from datetime import datetime
-import json, hashlib, secrets
+assets/guides/LCA-Light Usage Overview.docx
 
-def ensure_dir(p: Path):
-    """
-    Ensure 'p' is a directory. If a *file* exists at that path,
-    rename it aside and create the directory.
-    """
-    if p.exists() and not p.is_dir():
-        backup = p.with_name(f"{p.name}_conflict_{datetime.now().strftime('%Y%m%d%H%M%S')}")
-        p.rename(backup)
-    p.mkdir(parents=True, exist_ok=True)
+assets/guides/Text_Report of the Easy LCA Tool.docx
 
-# 1) Folders
-ASSETS = Path("assets")
-ensure_dir(ASSETS)
+assets/guides/LCA Tool Redesign V2.pdf
 
-DB_ROOT = ASSETS / "databases"
-ensure_dir(DB_ROOT)
-
-# 2) Files
-USERS_FILE = ASSETS / "users.json"
-ACTIVE_DB_FILE = DB_ROOT / "active.json"  # stores {"path": "<active .xlsx>"}
-
-# 3) Users bootstrap (NO self-signup; 3 pre-created accounts)
-def _hash(pw: str, salt: str) -> str:
-    return hashlib.sha256((salt + pw).encode()).hexdigest()
-
-def _save_users(users: dict):
-    USERS_FILE.write_text(json.dumps(users, indent=2))
-
-def _load_users() -> dict:
-    try:
-        return json.loads(USERS_FILE.read_text())
-    except Exception:
-        return {}
-
-def bootstrap_users_if_needed():
-    # If users.json is missing/empty, create your 3 accounts with a default password
-    users = _load_users()
-    if users:
-        return
-    default_pw = "ChangeMe123!"
-    emails = [
-        "sustainability@tchai.nl",
-        "jillderegt@tchai.nl",
-        "veravanbeaumont@tchai.nl",
-    ]
-    out = {}
-    for email in emails:
-        salt = secrets.token_hex(8)
-        out[email] = {
-            "salt": salt,
-            "hash": _hash(default_pw, salt),
-            "created_at": datetime.now().isoformat()
-        }
-    _save_users(out)
-
-bootstrap_users_if_needed()
+assets/guides/LCA Tool.pdf
