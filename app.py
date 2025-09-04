@@ -1,17 +1,4 @@
-# TCHAI — Easy LCA Indicator (Clean Rewrite)
-# -------------------------------------------------------------
-# Goals addressed:
-# - Stable assets/data folders (no FileExistsError)
-# - Local auth (create account + sign in) with salted SHA256
-# - Persist uploaded Excel database per-user (survives refresh)
-# - Read processes/materials from the SAME Excel file
-# - No automatic data preview on upload
-# - Black & white UI, brand purple charts
-# - TCHAI logo (assets/tchai_logo.png) shown in header
-# - Sidebar navigation; header left logo + centered title
-# - Report downloads (HTML + CSV)
-# - Robust validation + clear messaging
-# -------------------------------------------------------------
+# TCHAI — Easy LCA Indicator
 
 import streamlit as st
 import pandas as pd
