@@ -741,10 +741,10 @@ if page == "Workspace":
         with t3:
             meta = vm.list()
             if not meta:
-                st.info("Nothing to
                 st.info("Nothing to manage yet.")
             else:
                 sel = st.selectbox("Select version to delete", list(meta.keys()))
                 if st.button("🗑️ Delete"):
                     ok, msg = vm.delete(sel)
                     st.success(msg) if ok else st.error(msg)
+
