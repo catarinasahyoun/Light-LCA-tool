@@ -941,3 +941,6 @@ if page == "User Guide":
 
     if not found_any:
         st.info("No guide files found yet. Place your PDFs/DOCX in 'assets/guides' and refresh.")
+
+    # Stay within the User Guide page and end execution cleanly
+    st.stop()
