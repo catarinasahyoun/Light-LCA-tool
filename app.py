@@ -593,7 +593,7 @@ if page=="Report":
     project=st.text_input("Project name", value="Sample Project")
     notes=st.text_area("Executive notes")
     html=f"""
-   <!doctype html><html><head><meta charset='utf-8'><title>LCA Report — {project}</title>
+   <!doctype html><html><head><meta charset='utf-8'><title>LCA Report {project}</title>
     <style>body{{font-family:Arial, sans-serif;margin:24px}} header{{display:flex;align-items:center;gap:12px;margin-bottom:8px}} .title{{font-weight:800;color:#000}} table{{border-collapse:collapse;width:100%}} th,td{{border:1px solid #e5e7eb;padding:6px 8px;text-align:left}}</style></head>
     <body><header>{logo}<div class='title'>TCHAI — Easy LCA Indicator</div></header>
     <div><b>Project:</b> {project}</div>
@@ -651,3 +651,4 @@ st.subheader("Branding")
     if up is not None:
         data = up.read(); (ASSETS/"tchai_logo.png").write_bytes(data); st.success("Logo saved. Reload to apply.")
         st.image(data, caption="Preview", width=220)
+
