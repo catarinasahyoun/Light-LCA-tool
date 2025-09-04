@@ -272,7 +272,8 @@ def parse_processes(df_raw: pd.DataFrame) -> dict:
                 return a
         return None
 
-    col_proc = pick(["process","step","operation","process name","name"]) 
+    # Prefer your sheet's exact headers first, then fall back to broader aliases
+    col_proc = pick(["process type","process_type","process","step","operation","process name","name"])
     col_co2  = pick(["co2e","co2e (kg)","co2","emission","factor","co2e factor","emission factor (kg)"]) 
     col_unit = pick(["unit","uom","units","measure","measurement"]) 
 
@@ -498,7 +499,7 @@ if page == "Inputs":
         st.warning("No materials parsed. Check your columns: Material name/material/name + CO2e + (optional) Recycled/EoL/Lifetime/Circularity.")
         st.stop()
     if parsed_p == 0:
-        st.warning("No processes parsed. Ensure 'Processes' sheet has columns like Process/Step/Operation + CO2e/Emission + Unit.")
+        st.warning("No processes parsed. Ensure the 'Processes' sheet has columns like **Process Type** + **CO2e** + **Unit** (exact headers), or use aliases such as Process/Step/Operation for the name column.)
 
     # Lifetime + Materials UI
     st.subheader("Lifetime (weeks)")
