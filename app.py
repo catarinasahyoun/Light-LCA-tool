@@ -1,802 +1,486 @@
-# app.py
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-import json, re, base64, secrets
-from datetime import datetime
+# Light LCA Tool — refreshed UI + persistent DB + built‑in User Guide
+# ---------------------------------------------------------------
+# Notes
+# - Drop this in your Streamlit project as app.py (replacing the old one).
+# - It adds: a polished layout, persistent per‑user database storage,
+#   and a "User Guide" tab that renders your DOCX/PDF if present.
+# - It avoids auto‑previewing uploaded tables by default (you can turn it on).
+# - It reads processes/materials directly from the same uploaded Excel file.
+# - If third‑party libraries like `mammoth` or `python-docx` are not installed,
+#   the User Guide tab will gracefully fall back to a download link.
+#
+# Author: ChatGPT (Catou TCHAI)
+# ---------------------------------------------------------------
+
+import io
+import os
+import re
+import json
+import base64
+import hashlib
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Tuple, Dict
 
-# =============================================================
-# TCHAI — Easy LCA Indicator (rebuilt)
-# =============================================================
+import pandas as pd
+import streamlit as st
 
+# ---------- Page & Theme ----------
 st.set_page_config(
-    page_title="TCHAI — Easy LCA Indicator",
-    page_icon="🌿",
+    page_title="Light LCA Tool",
+    page_icon="🌱",
     layout="wide",
-    initial_sidebar_state="expanded",
+    menu_items={
+        "Get Help": "https://docs.streamlit.io/",
+        "Report a bug": "mailto:edwinsahyoun24@gmail.com",
+        "About": "Light LCA Tool — refreshed UI (Sep 2025)"
+    }
 )
 
-# -----------------------------
-# Folders & tiny persistence
-# -----------------------------
-def ensure_dir(p: Path):
-    if p.exists() and not p.is_dir():
-        backup = p.with_name(f"{p.name}_conflict_{datetime.now().strftime('%Y%m%d%H%M%S')}")
-        p.rename(backup)
-    p.mkdir(parents=True, exist_ok=True)
+PRIMARY = "#00A67E"  # teal/green accent
+BG_CARD = "#0f172a1a"  # subtle slate overlay
 
-ASSETS = Path("assets"); ensure_dir(ASSETS)
-DB_ROOT = ASSETS / "databases"; ensure_dir(DB_ROOT)
-
-USERS_FILE = ASSETS / "users.json"
-# Per-user preferences + state
-# {
-#   "<email>": {
-#     "path": "<abs path to .xlsx>",
-#     "materials_sheet": "...",
-#     "processes_sheet": "...",
-#     "process_mappings": {
-#         "<abs path to .xlsx>": {"name":"<col>", "co2e":"<col>", "unit":"<col|<none>>"}
-#     }
-#   }
-# }
-ACTIVE_MAP_FILE = DB_ROOT / "active_map.json"
-
-def read_json(path: Path, default):
-    try:
-        return json.loads(path.read_text())
-    except Exception:
-        return default
-
-def write_json(path: Path, data):
-    path.write_text(json.dumps(data, indent=2))
-
-def _rerun():
-    if hasattr(st, "rerun"):
-        st.rerun()
-    else:
-        try:
-            st.experimental_rerun()
-        except Exception:
-            pass
-
-# -----------------------------
-# Branding (logo)
-# -----------------------------
-def _load_logo_bytes():
-    for p in [ASSETS / "tchai_logo.png", Path("tchai_logo.png")]:
-        if p.exists():
-            return p.read_bytes()
-    return None
-
-_LOGO = _load_logo_bytes()
-
-def logo_tag(height=86):
-    if not _LOGO:
-        return "<span style='font-weight:900;font-size:28px'>TCHAI</span>"
-    b64 = base64.b64encode(_LOGO).decode()
-    return f"<img src='data:image/png;base64,{b64}' alt='TCHAI' style='height:{height}px'/>"
-
-# -----------------------------
-# Theme (B&W + purple charts)
-# -----------------------------
-PURPLE = ['#5B21B6','#6D28D9','#7C3AED','#8B5CF6','#A78BFA','#C4B5FD']
-st.markdown("""
+_CUSTOM_CSS = f"""
 <style>
-  .stApp { background:#fff; color:#000; }
-  .metric { border:1px solid #111; border-radius:12px; padding:14px; text-align:center; }
-  .brand-title { font-weight:900; font-size:26px; text-align:center; }
-  .nav-note { color:#6b7280; font-size:12px; }
-  .avatar { width:36px; height:36px; border-radius:9999px; background:#111; color:#fff;
-            display:flex; align-items:center; justify-content:center; font-weight:800; }
-  .stSelectbox div[data-baseweb="select"],
-  .stNumberInput input,
-  .stTextInput input,
-  .stTextArea textarea { border:1px solid #111; }
+/***** Global polish *****/
+:root {{
+  --brand: {PRIMARY};
+}}
+.block-container {{
+  padding-top: 1.2rem;
+  padding-bottom: 3rem;
+}}
+
+/***** Section headers *****/
+.h-section {{
+  font-size: 1.4rem; font-weight: 700; margin: .5rem 0 1rem 0;
+}}
+.subtitle {{ color: #64748b; margin-top: -6px; }}
+
+/***** Card *****/
+.card {{
+  background: {BG_CARD};
+  border: 1px solid rgba(15,23,42,.08);
+  border-radius: 1rem;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 6px 20px rgba(0,0,0,.05);
+}}
+.card h3 {{ margin: 0 0 .75rem 0; }}
+
+/***** Buttons *****/
+.stButton>button {{
+  background: var(--brand) !important;
+  color: white !important;
+  border-radius: .75rem !important;
+  border: 0 !important;
+  padding: .55rem 1rem !important;
+}}
+.stDownloadButton>button {{
+  border-radius: .75rem !important;
+}}
+
+/***** Tabs *****/
+.stTabs [data-baseweb="tab-list"] {{ gap: .25rem; }}
+.stTabs [data-baseweb="tab"] {{
+  border-radius: .75rem;
+  padding-top: .5rem; padding-bottom: .5rem;
+}}
+
+/***** Sidebar logo *****/
+.sidebar-logo {{ display: flex; align-items: center; gap: .5rem; }}
+.sidebar-logo img {{ width: 28px; height: 28px; border-radius: .5rem; }}
+.sidebar-logo span {{ font-weight: 700; }}
+
+.small-muted {{ font-size: .85rem; color: #64748b; }}
+.kpi {{ font-size: 1.25rem; font-weight: 700; }}
 </style>
-""", unsafe_allow_html=True)
+"""
 
-# -----------------------------
-# Users (3 pre-created; no signup)
-# -----------------------------
-def _hash(pw: str, salt: str) -> str:
-    import hashlib
-    return hashlib.sha256((salt + pw).encode()).hexdigest()
+st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
 
-def _load_users() -> dict:
-    return read_json(USERS_FILE, {})
+# ---------- Utilities ----------
+APP_DIR = Path.cwd()
+DATA_DIR = APP_DIR / "data"
+GUIDE_DIR = APP_DIR / "guides"
+DATA_DIR.mkdir(exist_ok=True)
+GUIDE_DIR.mkdir(exist_ok=True)
 
-def _save_users(users: dict):
-    write_json(USERS_FILE, users)
+DEFAULT_DB_NAME = "lca_database.xlsx"
+PROCESSES_SHEET = "Processes"
+MATERIALS_SHEET = "Materials"
 
-def _initials(email: str) -> str:
-    parts = [p for p in re.split(r"\s+|_+|\.+|@", email) if p]
-    return ((parts[0][0] if parts else "U") + (parts[1][0] if len(parts) > 1 else "")).upper()
 
-def bootstrap_users_if_needed():
-    users = _load_users()
-    if users: return
-    default_pw = "ChangeMe123!"
-    emails = [
-        "sustainability@tchai.nl",
-        "jillderegt@tchai.nl",
-        "veravanbeaumont@tchai.nl",
-    ]
-    out = {}
-    for email in emails:
-        salt = secrets.token_hex(8)
-        out[email] = {"salt": salt, "hash": _hash(default_pw, salt), "created_at": datetime.now().isoformat()}
-    _save_users(out)
+def _hash_user(email: str) -> str:
+    return hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()[:16]
 
-bootstrap_users_if_needed()
-if "auth_user" not in st.session_state: st.session_state.auth_user = None
 
-# -----------------------------
-# Per-user state (db + sheets + mapping)
-# -----------------------------
-def _load_active_map() -> Dict[str, Dict[str, Any]]:
-    return read_json(ACTIVE_MAP_FILE, {})
+def current_user_folder(email: str) -> Path:
+    return DATA_DIR / _hash_user(email)
 
-def _save_active_map(m: Dict[str, Dict[str, Any]]):
-    write_json(ACTIVE_MAP_FILE, m)
 
-def set_user_active_db(email: str, xlsx_path: Path):
-    m = _load_active_map()
-    rec = m.get(email, {})
-    rec["path"] = str(xlsx_path.resolve())
-    m[email] = rec
-    _save_active_map(m)
+def save_uploaded_file(uploaded, out_path: Path):
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "wb") as f:
+        f.write(uploaded.getbuffer())
+    return out_path
 
-def set_user_sheet_prefs(email: str, materials_sheet: Optional[str], processes_sheet: Optional[str]):
-    m = _load_active_map()
-    rec = m.get(email, {})
-    rec["materials_sheet"] = materials_sheet
-    rec["processes_sheet"] = processes_sheet
-    m[email] = rec
-    _save_active_map(m)
 
-def set_user_process_mapping(email: str, xlsx_path: Path, mapping: Dict[str, Optional[str]]):
-    m = _load_active_map()
-    rec = m.get(email, {})
-    maps = rec.get("process_mappings", {})
-    maps[str(xlsx_path.resolve())] = mapping
-    rec["process_mappings"] = maps
-    m[email] = rec
-    _save_active_map(m)
+def read_excel_db(path: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Read processes & materials from a single Excel workbook.
+    Expects sheets named 'Processes' and 'Materials'.
+    """
+    xl = pd.ExcelFile(path)
+    if PROCESSES_SHEET not in xl.sheet_names:
+        raise ValueError(f"Missing '{PROCESSES_SHEET}' sheet in {path.name}")
+    if MATERIALS_SHEET not in xl.sheet_names:
+        raise ValueError(f"Missing '{MATERIALS_SHEET}' sheet in {path.name}")
+    df_proc = xl.parse(PROCESSES_SHEET).fillna(0)
+    df_mat = xl.parse(MATERIALS_SHEET).fillna(0)
+    # normalize headers
+    df_proc.columns = [str(c).strip() for c in df_proc.columns]
+    df_mat.columns = [str(c).strip() for c in df_mat.columns]
+    return df_proc, df_mat
 
-def get_user_process_mapping(email: str, xlsx_path: Path) -> Optional[Dict[str, str]]:
-    rec = _load_active_map().get(email, {})
-    maps = rec.get("process_mappings", {})
-    return maps.get(str(xlsx_path.resolve()))
 
-def get_user_state(email: str) -> Dict[str, Any]:
-    return _load_active_map().get(email, {})
+def get_user_db_path() -> Optional[Path]:
+    user = st.session_state.get("user", {})
+    email = user.get("email")
+    if not email:
+        return None
+    user_dir = current_user_folder(email)
+    candidate = user_dir / DEFAULT_DB_NAME
+    return candidate if candidate.exists() else None
 
-def get_user_active_db(email: str) -> Optional[Path]:
-    rec = get_user_state(email)
-    p = Path(rec.get("path", "")) if rec else None
-    if p and p.exists(): return p
-    # fallback: typical file names or newest uploaded
-    for candidate in [DB_ROOT / "Refined database (1).xlsx",
-                      DB_ROOT / "Refined database.xlsx",
-                      ASSETS / "Refined database (1).xlsx",
-                      ASSETS / "Refined database.xlsx",
-                      Path("Refined database (1).xlsx"),
-                      Path("Refined database.xlsx")]:
-        if candidate.exists(): return candidate
-    dbs = sorted(DB_ROOT.glob("*.xlsx"), key=lambda x: x.stat().st_mtime, reverse=True)
-    return dbs[0] if dbs else None
 
-def list_databases():
-    return sorted(DB_ROOT.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
-
-# -----------------------------
-# Navbar & header
-# -----------------------------
-with st.sidebar:
-    st.markdown(f"<div style='display:flex;justify-content:center;margin-bottom:10px'>{logo_tag(64)}</div>", unsafe_allow_html=True)
-    if st.session_state.auth_user:
-        page = st.radio("Navigate", ["Inputs", "Workspace", "Settings"], index=0)
-        st.markdown("<div class='nav-note'>Inputs are separate. Workspace has Results, Comparison, Summary, Report & Versions.</div>", unsafe_allow_html=True)
-    else:
-        page = "Sign in"
-
-cl, cm, cr = st.columns([0.18, 0.64, 0.18])
-with cl: st.markdown(f"{logo_tag(86)}", unsafe_allow_html=True)
-with cm: st.markdown("<div class='brand-title'>Easy LCA Indicator</div>", unsafe_allow_html=True)
-with cr:
-    if st.session_state.auth_user:
-        initials = _initials(st.session_state.auth_user)
-        if hasattr(st, "popover"):
-            with st.popover(f"👤 {initials}"):
-                st.write(f"Signed in as **{st.session_state.auth_user}**")
-                st.markdown("---")
-                st.subheader("Account settings")
-                with st.form("change_pw_form", clear_on_submit=True):
-                    cur = st.text_input("Current password", type="password")
-                    new = st.text_input("New password", type="password")
-                    conf = st.text_input("Confirm new password", type="password")
-                    submitted = st.form_submit_button("Change password")
-                if submitted:
-                    users = _load_users()
-                    rec = users.get(st.session_state.auth_user)
-                    if not rec or _hash(cur, rec["salt"]) != rec["hash"]:
-                        st.error("Current password is incorrect.")
-                    elif not new or new != conf:
-                        st.error("New passwords don't match.")
-                    else:
-                        salt = secrets.token_hex(8)
-                        rec["salt"] = salt
-                        rec["hash"] = _hash(new, salt)
-                        users[st.session_state.auth_user] = rec
-                        _save_users(users)
-                        st.success("Password changed.")
-                st.markdown("---")
-                if st.button("Sign out"):
-                    st.session_state.auth_user = None
-                    _rerun()
-
-# -----------------------------
-# Sign-in gate
-# -----------------------------
-if not st.session_state.auth_user:
-    st.markdown("### Sign in to continue")
-    u = st.text_input("Email", placeholder="you@tchai.nl")
-    p = st.text_input("Password", type="password")
-    if st.button("Sign in"):
-        users = _load_users()
-        rec = users.get(u)
-        if not rec:
-            st.error("Unknown user.")
-        elif _hash(p, rec["salt"]) != rec["hash"]:
-            st.error("Wrong password.")
-        else:
-            st.session_state.auth_user = u
-            st.success("Welcome!")
-            _rerun()
-    st.stop()
-
-# =============================================================
-# Helpers: parsing & computations
-# =============================================================
-def extract_number(v):
+def try_import_mammoth():
     try:
-        return float(v)
+        import mammoth  # type: ignore
+        return mammoth
     except Exception:
-        s = str(v).replace(',', '.')
-        m = re.search(r"[-+]?\d*\.?\d+", s)
-        return float(m.group()) if m else 0.0
+        return None
 
-def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = [re.sub(r"\s+", " ", str(c).strip()).lower() for c in df.columns]
-    return df
 
-def _find_sheet(xls: pd.ExcelFile, target: Optional[str]) -> Optional[str]:
-    if not target: return None
-    names = xls.sheet_names
-    for n in names:
-        if n == target: return n
-    t = re.sub(r"\s+", "", target.lower())
-    for n in names:
-        if re.sub(r"\s+", "", n.lower()) == t: return n
-    for n in names:
-        if target.lower() in n.lower(): return n
+def try_import_docx():
+    try:
+        import docx  # type: ignore
+        return docx
+    except Exception:
+        return None
+
+
+def docx_to_html(doc_path: Path) -> Optional[str]:
+    mammoth = try_import_mammoth()
+    if mammoth:
+        with open(doc_path, "rb") as f:
+            result = mammoth.convert_to_html(f)
+            return result.value
+    # fallback to plain text if python-docx is present
+    docx = try_import_docx()
+    if docx:
+        doc = docx.Document(str(doc_path))
+        text = "\n\n".join(p.text for p in doc.paragraphs)
+        return f"<pre>{text}</pre>"
     return None
 
-def parse_materials(df_raw: pd.DataFrame) -> dict:
-    if df_raw is None or df_raw.empty: return {}
-    df = _normalize_cols(df_raw)
 
-    def pick(aliases):
-        for a in aliases:
-            if a in df.columns: return a
-        return None
+def embed_pdf(file_path: Path, height: int = 800):
+    b64 = base64.b64encode(file_path.read_bytes()).decode("utf-8")
+    pdf_display = f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="{height}" type="application/pdf"></iframe>'
+    st.markdown(pdf_display, unsafe_allow_html=True)
 
-    col_name = pick(["material name","material","name"])
-    col_co2  = pick(["co2e (kg)","co2e/kg","co2e","co2e per kg","co2 (kg)","emission factor","kg co2e/kg"])
-    col_rc   = pick(["recycled content","recycled content (%)","recycled","recycled %"])
-    col_eol  = pick(["eol","end of life"])
-    col_life = pick(["lifetime","life","lifespan","lifetime (years)"])
-    col_circ = pick(["circularity","circ"])
 
-    if not col_name or not col_co2: return {}
-
-    out = {}
-    for _, r in df.iterrows():
-        name = (str(r[col_name]).strip() if pd.notna(r[col_name]) else "")
-        if not name: continue
-        out[name] = {
-            "CO₂e (kg)": extract_number(r[col_co2]) if pd.notna(r[col_co2]) else 0.0,
-            "Recycled Content": extract_number(r[col_rc]) if col_rc and pd.notna(r.get(col_rc, None)) else 0.0,
-            "EoL": str(r[col_eol]).strip() if col_eol and pd.notna(r.get(col_eol, None)) else "Unknown",
-            "Lifetime": str(r[col_life]).strip() if col_life and pd.notna(r.get(col_life, None)) else "Unknown",
-            "Circularity": str(r[col_circ]).strip() if col_circ and pd.notna(r.get(col_circ, None)) else "Unknown",
-        }
-    return out
-
-def parse_processes(df_raw: pd.DataFrame) -> dict:
-    """
-    Tolerant 'Processes' parser with aliases + heuristics.
-    """
-    if df_raw is None or df_raw.empty: return {}
-    df = _normalize_cols(df_raw)
-
-    def pick(aliases):
-        for a in aliases:
-            if a in df.columns: return a
-        return None
-
-    col_proc = pick(["process","step","operation","name","process name"])
-    col_co2  = pick(["co2e","co2e (kg)","co2","emission","factor","kg per unit","kg/unit","kg co2e/unit"])
-    col_unit = pick(["unit","units","uom"])
-
-    # Heuristics if missing
-    if not col_proc:
-        obj_cols = [c for c in df.columns if df[c].dtype == object]
-        if obj_cols:
-            best = None
-            for c in obj_cols:
-                vals = df[c].dropna().astype(str).str.strip()
-                if len(vals) and vals.nunique() >= max(5, int(len(vals)*0.5)):
-                    best = c; break
-            col_proc = best or obj_cols[0]
-
-    if not col_co2:
-        num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-        if not num_cols:
-            for c in df.columns:
-                try:
-                    pd.to_numeric(df[c]); num_cols.append(c)
-                except Exception:
-                    pass
-        col_co2 = num_cols[0] if num_cols else None
-
-    if not col_unit:
-        txt_cols = [c for c in df.columns if df[c].dtype == object]
-        for c in txt_cols:
-            vals = df[c].dropna().astype(str).str.strip()
-            if len(vals) and vals.map(len).mean() <= 6 and vals.nunique() <= 10:
-                col_unit = c; break
-
-    if not col_proc or not col_co2: return {}
-
-    out = {}
-    for _, r in df.iterrows():
-        name = str(r[col_proc]).strip() if pd.notna(r[col_proc]) else ""
-        if not name: continue
-        try:
-            co2e = extract_number(r[col_co2]) if pd.notna(r[col_co2]) else 0.0
-        except Exception:
-            co2e = 0.0
-        unit = str(r[col_unit]).strip() if col_unit and pd.notna(r.get(col_unit, None)) else ""
-        out[name] = {"CO₂e": co2e, "Unit": unit}
-    return out
-
-# -----------------------------
-# Session storage
-# -----------------------------
-if "materials" not in st.session_state: st.session_state.materials = {}
-if "processes" not in st.session_state: st.session_state.processes = {}
-if "assessment" not in st.session_state:
-    st.session_state.assessment = {
-        "lifetime_weeks": 52,
-        "selected_materials": [],
-        "material_masses": {},
-        "processing_data": {}
-    }
-
-# =============================================================
-# Inputs (no previews; per-user DB; mapping fallback & memory)
-# =============================================================
-if page == "Inputs":
-    email = st.session_state.auth_user
-    active_path = get_user_active_db(email)
-    st.subheader("Database")
-    if active_path:
-        st.success(f"Active database for **{email}**: **{active_path.name}**")
-    else:
-        st.error("No active database found for your account. Go to Settings → Database Manager to upload/activate one.")
-        st.stop()
-
-    try:
-        xls = pd.ExcelFile(str(active_path))
-    except Exception as e:
-        st.error(f"Failed to open Excel: {active_path.name} — {e}")
-        st.stop()
-
-    state = get_user_state(email)
-    pref_mat = state.get("materials_sheet")
-    pref_pro = state.get("processes_sheet")
-
-    # auto-detect if missing
-    auto_mat = _find_sheet(xls, pref_mat) if pref_mat else _find_sheet(xls, "Materials")
-    auto_pro = _find_sheet(xls, pref_pro) if pref_pro else _find_sheet(xls, "Processes")
-
-    c1, c2 = st.columns(2)
-    with c1:
-        mat_choice = st.selectbox("Materials sheet", options=xls.sheet_names,
-                                  index=(xls.sheet_names.index(auto_mat) if auto_mat in xls.sheet_names else 0))
-    with c2:
-        proc_choice = st.selectbox("Processes sheet", options=xls.sheet_names,
-                                   index=(xls.sheet_names.index(auto_pro) if auto_pro in xls.sheet_names else 0))
-
-    # persist sheet names for this user
-    if (mat_choice != pref_mat) or (proc_choice != pref_pro):
-        set_user_sheet_prefs(email, mat_choice, proc_choice)
-
-    # Read both sheets from SAME workbook
-    try:
-        mats_df = pd.read_excel(xls, sheet_name=mat_choice)
-        procs_df = pd.read_excel(xls, sheet_name=proc_choice)
-    except Exception as e:
-        st.error(f"Could not read selected sheets: {e}")
-        st.stop()
-
-    st.session_state.materials = parse_materials(mats_df)
-
-    # First try normal parsing
-    processes_from_sheet = parse_processes(procs_df)
-
-    # If empty, try applying a stored mapping for THIS file
-    if not processes_from_sheet:
-        prev_map = get_user_process_mapping(email, active_path)
-        if prev_map:
-            dfp = _normalize_cols(procs_df)
-            name_col = prev_map.get("name")
-            co2_col  = prev_map.get("co2e")
-            unit_col = prev_map.get("unit")  # may be "<none>"
-            if name_col in dfp.columns and co2_col in dfp.columns and (unit_col in dfp.columns or unit_col == "<none>" or unit_col is None):
-                proc_map = {}
-                for _, r in dfp.iterrows():
-                    nm = str(r[name_col]).strip() if pd.notna(r[name_col]) else ""
-                    if not nm: continue
-                    val = extract_number(r[co2_col]) if pd.notna(r[co2_col]) else 0.0
-                    unit = "" if unit_col in (None, "<none>") else (str(r[unit_col]).strip() if pd.notna(r.get(unit_col, None)) else "")
-                    proc_map[nm] = {"CO₂e": val, "Unit": unit}
-                processes_from_sheet = proc_map
-
-    st.session_state.processes = processes_from_sheet
-
-    # If still empty, offer one-time mapping UI (persist mapping per user + file)
-    if not st.session_state.processes:
-        st.warning("No processes detected. Map columns below once; we’ll remember it for this file and your account.")
-        dfp = _normalize_cols(procs_df)
-        cols = list(dfp.columns)
-
-        # Heuristic guesses
-        def guess_name():
-            for a in ["process","step","operation","name","process name"]:
-                if a in cols: return a
-            for c in cols:
-                if dfp[c].dtype == object:
-                    return c
-            return cols[0] if cols else None
-
-        def guess_emission():
-            for a in ["co2e","co2e (kg)","co2","emission","factor","kg per unit","kg/unit","kg co2e/unit"]:
-                if a in cols: return a
-            for c in cols:
-                if pd.api.types.is_numeric_dtype(dfp[c]):
-                    return c
-            return cols[0] if cols else None
-
-        def guess_unit():
-            for a in ["unit","units","uom"]:
-                if a in cols: return a
-            for c in cols:
-                if dfp[c].dtype == object:
-                    vals = dfp[c].dropna().astype(str).str.strip()
-                    if len(vals) and vals.map(len).mean() <= 6 and vals.nunique() <= 10:
-                        return c
-            return None
-
-        prev_map = get_user_process_mapping(email, active_path) or {}
-        name_default = prev_map.get("name") or guess_name() or (cols[0] if cols else "")
-        co2_default  = prev_map.get("co2e") or guess_emission() or (cols[0] if cols else "")
-        unit_default = prev_map.get("unit") or (guess_unit() or "<none>")
-
-        cma, cmb, cmc = st.columns(3)
-        name_col = cma.selectbox("Process name column", cols, index=(cols.index(name_default) if name_default in cols else 0))
-        co2_col  = cmb.selectbox("Emission per unit column", cols, index=(cols.index(co2_default) if co2_default in cols else 0))
-        unit_choices = ["<none>"] + cols
-        unit_col = cmc.selectbox("Unit column (optional)", unit_choices,
-                                 index=(unit_choices.index(unit_default) if unit_default in unit_choices else 0))
-
-        if st.button("Build processes mapping"):
-            proc_map = {}
-            for _, r in dfp.iterrows():
-                nm = str(r[name_col]).strip() if pd.notna(r[name_col]) else ""
-                if not nm: continue
-                val = extract_number(r[co2_col]) if pd.notna(r[co2_col]) else 0.0
-                unit = "" if unit_col == "<none>" else (str(r[unit_col]).strip() if pd.notna(r.get(unit_col, None)) else "")
-                proc_map[nm] = {"CO₂e": val, "Unit": unit}
-            st.session_state.processes = proc_map
-            set_user_process_mapping(email, active_path, {"name": name_col, "co2e": co2_col, "unit": unit_col})
-            if proc_map:
-                st.success(f"Loaded {len(proc_map)} processes.")
-            else:
-                st.error("No valid processes created. Check your selections.")
-
-    # Materials UI
-    if len(st.session_state.materials) == 0:
-        st.error("No materials parsed from the selected Materials sheet. Please check your columns (Material name, CO2e, etc.).")
-        st.stop()
-
-    st.subheader("Lifetime (weeks)")
-    st.session_state.assessment["lifetime_weeks"] = st.number_input(
-        "", min_value=1, value=int(st.session_state.assessment.get("lifetime_weeks", 52))
-    )
-
-    st.subheader("Materials & processes")
-    mats = list(st.session_state.materials.keys())
-    st.session_state.assessment["selected_materials"] = st.multiselect(
-        "Select materials", options=mats, default=st.session_state.assessment.get("selected_materials", [])
-    )
-
-    if not st.session_state.assessment["selected_materials"]:
-        st.info("Select at least one material to proceed.")
-        st.stop()
-
-    for m in st.session_state.assessment["selected_materials"]:
-        st.markdown(f"### {m}")
-        masses = st.session_state.assessment.setdefault("material_masses", {})
-        procs_data = st.session_state.assessment.setdefault("processing_data", {})
-
-        mass_default = float(masses.get(m, 1.0))
-        masses[m] = st.number_input(f"Mass of {m} (kg)", min_value=0.0, value=mass_default, key=f"mass_{m}")
-
-        props = st.session_state.materials[m]
-        st.caption(f"CO₂e/kg: {props['CO₂e (kg)']} · Recycled %: {props['Recycled Content']} · EoL: {props['EoL']}")
-
-        steps = procs_data.setdefault(m, [])
-        n = st.number_input(f"How many processing steps for {m}?", min_value=0, max_value=10, value=len(steps), key=f"steps_{m}")
-        if n < len(steps):
-            steps[:] = steps[:int(n)]
-        else:
-            for _ in range(int(n) - len(steps)):
-                steps.append({"process": "", "amount": 1.0, "co2e_per_unit": 0.0, "unit": ""})
-
-        for i in range(int(n)):
-            proc_options = [''] + sorted(list(st.session_state.processes.keys()))
-            current_proc = steps[i].get('process', '')
-            idx = proc_options.index(current_proc) if current_proc in proc_options else 0
-            proc = st.selectbox(f"Process #{i+1}", options=proc_options, index=idx, key=f"proc_{m}_{i}")
-            if proc:
-                pr = st.session_state.processes.get(proc, {})
-                amt = st.number_input(
-                    f"Amount for '{proc}' ({pr.get('Unit','')})",
-                    min_value=0.0, value=float(steps[i].get('amount', 1.0)), key=f"amt_{m}_{i}"
-                )
-                steps[i] = {"process": proc, "amount": amt, "co2e_per_unit": pr.get('CO₂e', 0.0), "unit": pr.get('Unit', '')}
-
-# -----------------------------
-# Compute results
-# -----------------------------
-def compute_results():
-    data = st.session_state.assessment
-    mats = st.session_state.materials
-
-    total_material = 0.0
-    total_process  = 0.0
-    total_mass     = 0.0
-    weighted       = 0.0
-    eol            = {}
-    cmp_rows       = []
-
-    circ_map = {"high": 3, "medium": 2, "low": 1, "not circular": 0}
-
-    for name in data.get('selected_materials', []):
-        m = mats.get(name, {})
-        mass = float(data.get('material_masses', {}).get(name, 0))
-        total_mass += mass
-        total_material += mass * float(m.get('CO₂e (kg)', 0))
-        weighted += mass * float(m.get('Recycled Content', 0))
-        eol[name] = m.get('EoL', 'Unknown')
-
-        for s in data.get('processing_data', {}).get(name, []):
-            total_process += float(s.get('amount', 0)) * float(s.get('co2e_per_unit', 0))
-
-        cmp_rows.append({
-            'Material': name,
-            'CO2e per kg': float(m.get('CO₂e (kg)', 0)),
-            'Recycled Content (%)': float(m.get('Recycled Content', 0)),
-            'Circularity (mapped)': circ_map.get(str(m.get('Circularity','')).strip().lower(), 0),
-            'Circularity (text)': m.get('Circularity', 'Unknown'),
-            'Lifetime (years)': extract_number(m.get('Lifetime', 0)),
-            'Lifetime (text)': m.get('Lifetime', 'Unknown'),
-        })
-
-    overall = total_material + total_process
-    years = max(data.get('lifetime_weeks', 52) / 52, 1e-9)
-
-    return {
-        'total_material_co2': total_material,
-        'total_process_co2': total_process,
-        'overall_co2': overall,
-        'weighted_recycled': (weighted / total_mass if total_mass > 0 else 0.0),
-        'trees_equiv': overall / (22 * years),
-        'total_trees_equiv': overall / 22,
-        'lifetime_years': years,
-        'eol_summary': eol,
-        'comparison': cmp_rows
-    }
-
-# -----------------------------
-# Workspace
-# -----------------------------
-if page == "Workspace":
-    if not st.session_state.assessment.get('selected_materials'):
-        st.info("Go to Inputs and add at least one material.")
-        st.stop()
-
-    R = compute_results()
-    tabs = st.tabs(["Results", "Comparison", "Final Summary", "Report", "Versions"])
-
-    # Results
-    with tabs[0]:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total CO₂ (materials)", f"{R['total_material_co2']:.1f} kg")
-        c2.metric("Total CO₂ (processes)", f"{R['total_process_co2']:.1f} kg")
-        c3.metric("Weighted recycled", f"{R['weighted_recycled']:.1f}%")
-
-    # Comparison
-    with tabs[1]:
-        df = pd.DataFrame(R['comparison'])
-        if df.empty:
-            st.info("No data yet.")
-        else:
-            def style(fig):
-                fig.update_layout(plot_bgcolor="#fff", paper_bgcolor="#fff",
-                                  font=dict(color="#000", size=14),
-                                  title_x=0.5, title_font_size=20)
-                return fig
-            c1, c2 = st.columns(2)
-            with c1:
-                fig = px.bar(df, x="Material", y="CO2e per kg", color="Material",
-                             title="CO₂e per kg", color_discrete_sequence=PURPLE)
-                st.plotly_chart(style(fig), use_container_width=True)
-            with c2:
-                fig = px.bar(df, x="Material", y="Recycled Content (%)", color="Material",
-                             title="Recycled Content (%)", color_discrete_sequence=PURPLE)
-                st.plotly_chart(style(fig), use_container_width=True)
-
-    # Final Summary
-    with tabs[2]:
-        m1, m2, m3 = st.columns(3)
-        m1.markdown(f"<div class='metric'><div>Total Impact CO₂e</div><h2>{R['overall_co2']:.1f} kg</h2></div>", unsafe_allow_html=True)
-        m2.markdown(f"<div class='metric'><div>Tree Equivalent / year</div><h2>{R['trees_equiv']:.1f}</h2></div>", unsafe_allow_html=True)
-        m3.markdown(f"<div class='metric'><div>Total Trees</div><h2>{R['total_trees_equiv']:.1f}</h2></div>", unsafe_allow_html=True)
-        st.markdown("#### End-of-Life Summary")
-        for k, v in R['eol_summary'].items():
-            st.write(f"• **{k}** — {v}")
-
-    # Report (HTML only)
-    with tabs[3]:
-        project = st.text_input("Project name", value="Sample Project")
-        notes = st.text_area("Executive notes")
-        big_logo = logo_tag(100)
-        html = f"""
-        <!doctype html><html><head><meta charset='utf-8'><title>{project} — TCHAI Report</title>
-        <style>
-          body{{font-family:Arial,sans-serif;margin:24px}}
-          header{{display:flex;align-items:center;gap:16px;margin-bottom:10px}}
-          th,td{{border:1px solid #eee;padding:6px 8px}}
-          table{{border-collapse:collapse;width:100%}}
-        </style></head>
-        <body>
-          <header>{big_logo}</header>
-          <h2 style='text-align:center'>Summary</h2>
-          <ul>
-            <li>Total CO₂e: {R['overall_co2']:.2f} kg</li>
-            <li>Weighted recycled: {R['weighted_recycled']:.1f}%</li>
-            <li>Materials: {R['total_material_co2']:.1f} kg · Processes: {R['total_process_co2']:.1f} kg</li>
-            <li>Trees/year: {R['trees_equiv']:.1f} · Total trees: {R['total_trees_equiv']:.1f}</li>
-          </ul>
-          <h3>End-of-Life</h3>
-          <ul>{''.join([f"<li><b>{k}</b> — {v}</li>" for k,v in R['eol_summary'].items()])}</ul>
-          <h3>Notes</h3><div>{notes or '—'}</div>
-        </body></html>
+# ---------- Sidebar (branding + identity) ----------
+with st.sidebar:
+    st.markdown(
         """
-        st.download_button(
-            "⬇️ Download HTML report",
-            data=html.encode(),
-            file_name=f"TCHAI_Report_{project.replace(' ','_')}.html",
-            mime="text/html"
-        )
+        <div class="sidebar-logo">
+          <img src="https://raw.githubusercontent.com/enchantedlabs/assets/refs/heads/main/tchai_logo.png" />
+          <span>Light LCA Tool</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown("""<span class="small-muted">UI refreshed · Sep 2025</span>""", unsafe_allow_html=True)
 
-    # Versions
-    with tabs[4]:
-        class VM:
-            def __init__(self, storage_dir: str = "lca_versions"):
-                self.dir = Path(storage_dir); self.dir.mkdir(exist_ok=True)
-                self.meta = self.dir / "lca_versions_metadata.json"
-            def _load(self): return read_json(self.meta, {})
-            def _save(self, m): write_json(self.meta, m)
-            def save(self, name, data, desc=""):
-                m = self._load()
-                if not name: return False, "Enter a name."
-                if name in m: return False, "Name exists."
-                fp = self.dir / f"{name}.json"
-                payload = {"assessment_data": data, "timestamp": datetime.now().isoformat(), "description": desc}
-                fp.write_text(json.dumps(payload))
-                m[name] = {"filename": fp.name, "description": desc, "created_at": datetime.now().isoformat()}
-                self._save(m); return True, "Saved."
-            def list(self): return self._load()
-            def load(self, name):
-                m = self._load()
-                if name not in m: return None, "Not found."
-                fp = self.dir / m[name]["filename"]
-                if not fp.exists(): return None, "File missing."
-                return json.loads(fp.read_text())["assessment_data"], "Loaded."
-            def delete(self, name):
-                m = self._load()
-                if name not in m: return False, "Not found."
-                fp = self.dir / m[name]["filename"]
-                if fp.exists(): fp.unlink()
-                del m[name]; self._save(m); return True, "Deleted."
-
-        if "vm" not in st.session_state: st.session_state.vm = VM()
-        vm = st.session_state.vm
-
-        t1, t2, t3 = st.tabs(["Save", "Load", "Manage"])
-        with t1:
-            name = st.text_input("Version name")
-            desc = st.text_area("Description (optional)")
-            if st.button("💾 Save"):
-                data = {**st.session_state.assessment}
-                data.update(R)
-                ok, msg = vm.save(name, data, desc)
-                st.success(msg) if ok else st.error(msg)
-
-        with t2:
-            meta = vm.list()
-            if not meta:
-                st.info("No versions saved yet.")
+    # Simple sign-in (email only, no auth provider to keep things lightweight)
+    with st.expander("Sign in (for per‑user saved DB)", expanded=False):
+        email = st.text_input("Email", key="email_input", placeholder="name@example.com")
+        name = st.text_input("Name (optional)", key="name_input")
+        if st.button("Sign in"):
+            if email and re.match(r"^.+@.+\..+$", email):
+                st.session_state["user"] = {"email": email, "name": name}
+                st.success("Signed in. Your uploaded database will persist.")
             else:
-                sel = st.selectbox("Select version", list(meta.keys()))
-                if st.button("📂 Load"):
-                    data, msg = vm.load(sel)
-                    if data:
-                        st.session_state.assessment = data
-                        st.success(msg)
+                st.error("Please enter a valid email.")
+
+    if st.session_state.get("user"):
+        u = st.session_state["user"]
+        st.caption(f"Signed in as **{u.get('name') or u['email']}**")
+
+# ---------- Header ----------
+st.markdown("<div class='h-section'>🌿 Light LCA Tool</div>", unsafe_allow_html=True)
+st.markdown(
+    "<div class='subtitle'>Calculate product/process footprints, manage a shared database, and view the built‑in user guide.</div>",
+    unsafe_allow_html=True,
+)
+
+# ---------- Tabs ----------
+TAB_TITLES = ["Dashboard", "LCA Calculator", "Database", "Reports", "User Guide", "Settings"]
+
+Tabs = st.tabs(TAB_TITLES)
+
+# ----- Dashboard -----
+with Tabs[0]:
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("**Databases uploaded**")
+        st.markdown(f"<div class='kpi'>{len(list(DATA_DIR.rglob(DEFAULT_DB_NAME)))}</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    with c2:
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("**Signed‑in user**")
+        who = st.session_state.get("user", {}).get("email", "—")
+        st.markdown(f"<div class='kpi'>{who}</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    with c3:
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("**Guide detected**")
+        has_any_guide = any(p.exists() for p in [
+            GUIDE_DIR/"LCA-Light Usage Overview (1).docx",
+            GUIDE_DIR/"Text_Report of the Easy LCA Tool (1).docx",
+            GUIDE_DIR/"LCA Tool Redesign V2 (1).pdf",
+            GUIDE_DIR/"LCA Tool.pdf",
+        ])
+        st.markdown(f"<div class='kpi'>{'Yes' if has_any_guide else 'No'}</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("### Quick tips")
+    st.markdown("- Use **Database** to upload one Excel file containing both *Processes* and *Materials* sheets.")
+    st.markdown("- Turn on **Preview** only if you need to inspect the raw tables.")
+    st.markdown("- Sign in on the left to **persist** your DB per user.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ----- LCA Calculator -----
+with Tabs[1]:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("### Calculator")
+
+    # Load DB from session or disk
+    df_proc = st.session_state.get("df_processes")
+    df_mat = st.session_state.get("df_materials")
+
+    if df_proc is None or df_mat is None:
+        # try disk for signed-in user
+        db_path = get_user_db_path()
+        if db_path:
+            try:
+                df_proc, df_mat = read_excel_db(db_path)
+                st.session_state["df_processes"] = df_proc
+                st.session_state["df_materials"] = df_mat
+            except Exception as e:
+                st.warning(f"Could not load your saved DB: {e}")
+
+    if df_proc is None or df_mat is None:
+        st.info("No database loaded yet. Upload an Excel workbook first in the **Database** tab.")
+    else:
+        # Process selection
+        name_col = None
+        # Prefer a friendly column name if present
+        for cand in ["Process", "Name", "Process Name", "process", "name"]:
+            if cand in df_proc.columns:
+                name_col = cand
+                break
+        if name_col is None:
+            name_col = df_proc.columns[0]
+
+        proc_names = df_proc[name_col].astype(str).tolist()
+        selected_proc = st.selectbox("Select a process", proc_names)
+        qty = st.number_input("Quantity", min_value=0.0, value=1.0)
+        fu = st.text_input("Functional unit (e.g., kg, unit)", value="unit")
+
+        # Emission factor / impact columns detection
+        impact_cols = [c for c in df_proc.columns if re.search(r"(CO2|GHG|GWP|impact|emission)", str(c), re.I)]
+        if not impact_cols:
+            st.warning("No emission/impact columns detected in the Processes sheet. Add a column like 'GWP (kg CO2e/unit)'.")
+        else:
+            # Use the first detected impact as default
+            impact_col = st.selectbox("Impact factor column", impact_cols)
+            # Lookup the row
+            row = df_proc[df_proc[name_col].astype(str) == str(selected_proc)]
+            if row.empty:
+                st.error("Selected process not found. Check your Processes sheet.")
+            else:
+                factor = float(row.iloc[0][impact_col]) if pd.notna(row.iloc[0][impact_col]) else 0.0
+                total = qty * factor
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.metric(label=f"Impact factor ({impact_col})", value=f"{factor:,.4f}")
+                with c2:
+                    st.metric(label=f"Total impact for {qty:g} {fu}", value=f"{total:,.4f}")
+
+                st.caption("Tip: You can add more impact columns (e.g., water, energy) and pick them here.")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ----- Database -----
+with Tabs[2]:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("### Database (single Excel with `Processes` & `Materials` sheets)")
+
+    st.write("Upload or replace your workbook. If you are signed in, it will persist for your account.")
+    uploaded = st.file_uploader("Upload Excel (.xlsx)", type=["xlsx"], accept_multiple_files=False)
+
+    preview = st.toggle("Preview tables after upload", value=False)
+
+    if uploaded is not None:
+        # Save to per-user folder if signed in; else store in session only
+        if st.session_state.get("user"):
+            user = st.session_state["user"]
+            out_path = current_user_folder(user["email"]) / DEFAULT_DB_NAME
+            saved_path = save_uploaded_file(uploaded, out_path)
+            st.success(f"Saved database for {user.get('name') or user['email']}.")
+            try:
+                df_proc, df_mat = read_excel_db(saved_path)
+                st.session_state["df_processes"] = df_proc
+                st.session_state["df_materials"] = df_mat
+            except Exception as e:
+                st.error(f"Failed to read Excel: {e}")
+        else:
+            # session-only
+            try:
+                df_proc, df_mat = read_excel_db(Path(uploaded.name))  # this uses in-memory name; fallback below
+            except Exception:
+                # read from bytes buffer
+                uploaded.seek(0)
+                with pd.ExcelFile(uploaded) as xl:
+                    if PROCESSES_SHEET not in xl.sheet_names or MATERIALS_SHEET not in xl.sheet_names:
+                        st.error("Excel must contain 'Processes' and 'Materials' sheets.")
                     else:
-                        st.error(msg)
+                        df_proc = xl.parse(PROCESSES_SHEET).fillna(0)
+                        df_mat = xl.parse(MATERIALS_SHEET).fillna(0)
+            st.session_state["df_processes"] = df_proc
+            st.session_state["df_materials"] = df_mat
+            st.success("Database loaded for this session. Sign in to persist across sessions.")
 
-        with t3:
-            meta = vm.list()
-            if not meta:
-                st.info("Nothing to manage yet.")
+    # Offer explicit load from disk if signed in
+    if st.session_state.get("user") and st.button("Load my saved database"):
+        db_path = get_user_db_path()
+        if db_path:
+            try:
+                df_proc, df_mat = read_excel_db(db_path)
+                st.session_state["df_processes"] = df_proc
+                st.session_state["df_materials"] = df_mat
+                st.success("Database loaded from disk.")
+            except Exception as e:
+                st.error(f"Failed to read saved Excel: {e}")
+        else:
+            st.info("No saved database found yet.")
+
+    # Show preview if requested
+    if st.session_state.get("df_processes") is not None and preview:
+        st.subheader("Processes (preview)")
+        st.dataframe(st.session_state["df_processes"].head(30), use_container_width=True)
+    if st.session_state.get("df_materials") is not None and preview:
+        st.subheader("Materials (preview)")
+        st.dataframe(st.session_state["df_materials"].head(30), use_container_width=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ----- Reports -----
+with Tabs[3]:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("### Reports")
+    if st.session_state.get("df_processes") is None:
+        st.info("Run a few calculations and/or load a database to enable exports.")
+    else:
+        # For now, just allow exporting both sheets
+        with io.BytesIO() as output:
+            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                st.session_state["df_processes"].to_excel(writer, sheet_name="Processes", index=False)
+                if st.session_state.get("df_materials") is not None:
+                    st.session_state["df_materials"].to_excel(writer, sheet_name="Materials", index=False)
+            data = output.getvalue()
+        st.download_button("Download current DB (xlsx)", data=data, file_name="lca_current_db.xlsx")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ----- User Guide -----
+with Tabs[4]:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("### User Guide")
+
+    st.write("This tab renders your provided documentation if present in the `guides/` folder next to the app.")
+
+    # Detect available files from your uploads (place them into guides/ on the server)
+    candidates = [
+        GUIDE_DIR/"LCA-Light Usage Overview (1).docx",
+        GUIDE_DIR/"Text_Report of the Easy LCA Tool (1).docx",
+        GUIDE_DIR/"LCA Tool Redesign V2 (1).pdf",
+        GUIDE_DIR/"LCA Tool.pdf",
+    ]
+
+    found = [p for p in candidates if p.exists()]
+
+    # Allow runtime upload of a guide too (optional)
+    up_guide = st.file_uploader("Add/replace a guide (DOCX or PDF)", type=["docx", "pdf"], key="guide_upl")
+    if up_guide is not None:
+        dest = GUIDE_DIR / up_guide.name
+        save_uploaded_file(up_guide, dest)
+        st.success(f"Saved guide: {up_guide.name}")
+        found.insert(0, dest)
+
+    if not found:
+        st.info("No guide files found yet. Upload a DOCX/PDF above or place them into the `guides/` folder.")
+    else:
+        # Choose which doc to render
+        choice = st.selectbox("Choose a document to view", [p.name for p in found])
+        chosen = next(p for p in found if p.name == choice)
+
+        if chosen.suffix.lower() == ".docx":
+            html = docx_to_html(chosen)
+            if html:
+                st.markdown(html, unsafe_allow_html=True)
             else:
-                sel = st.selectbox("Select version to delete", list(meta.keys()))
-                if st.button("🗑️ Delete"):
-                    ok, msg = vm.delete(sel)
-                    st.success(msg) if ok else st.error(msg)
+                st.warning("Couldn't render the DOCX inline (missing `mammoth`/`python-docx`).")
+                st.download_button("Download DOCX", data=chosen.read_bytes(), file_name=chosen.name)
+        elif chosen.suffix.lower() == ".pdf":
+            try:
+                embed_pdf(chosen, height=900)
+            except Exception:
+                st.download_button("Download PDF", data=chosen.read_bytes(), file_name=chosen.name)
+        else:
+            st.download_button("Download file", data=chosen.read_bytes(), file_name=chosen.name)
 
-# -----------------------------
-# Settings (Database Manager) — per-user activation; NO preview
-# -----------------------------
-if page == "Settings":
-    email = st.session_state.auth_user
-    st.subheader("Database Manager")
-    up = st.file_uploader("Upload new database (.xlsx)", type=["xlsx"])
-    if up:
-        target = DB_ROOT / f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{up.name}"
-        with open(target, "wb") as f:
-            f.write(up.read())
-        set_user_active_db(email, target)  # remember for this user
-        st.success(f"Uploaded and activated for {email}: {target.name}")
-        _rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("### Available databases (in assets/databases)")
-    for db in list_databases():
-        cols = st.columns([0.7, 0.3])
-        with cols[0]:
-            st.write(db.name)
-        with cols[1]:
-            if st.button(f"Activate for me", key=f"act_{db.name}"):
-                set_user_active_db(email, db)
-                st.success(f"Activated for {email}: {db.name}")
-                _rerun()
+# ----- Settings -----
+with Tabs[5]:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("### Settings & Maintenance")
+
+    # Allow clearing the session cache
+    if st.button("Clear in‑memory data"):
+        for k in ["df_processes", "df_materials"]:
+            if k in st.session_state:
+                del st.session_state[k]
+        st.success("Cleared session data.")
+
+    # Delete saved DB for this user
+    if st.session_state.get("user"):
+        user_dir = current_user_folder(st.session_state["user"]["email"])
+        if (user_dir / DEFAULT_DB_NAME).exists():
+            if st.button("Delete my saved database"):
+                try:
+                    (user_dir / DEFAULT_DB_NAME).unlink(missing_ok=True)
+                    st.success("Deleted your saved database.")
+                except Exception as e:
+                    st.error(f"Couldn't delete: {e}")
+    else:
+        st.caption("Sign in (left) to manage your persisted database.")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ---------------------------
+# End of file
+# ---------------------------
