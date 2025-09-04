@@ -1,14 +1,9 @@
-# Light LCA Tool — sign‑in first, simple UI, dynamic User Guide
-# ---------------------------------------------------------------
-# What’s new in this version
-# - The very first screen is a **Sign in** form (email + optional name). Nothing else shows until you sign in.
-# - Clean, minimal layout with 5 tabs: Calculator, Database, User Guide, Reports, Settings.
-# - Per‑user database persistence: each user’s Excel DB is saved under ./data/<hash_of_email>/lca_database.xlsx.
-# - User Guide tab now lists **all** DOCX/PDF files in ./guides automatically (no fixed filenames).
-# - Optional preview toggle for raw tables.
-#
-# Drop this in as app.py and run:  streamlit run app.py
-# ---------------------------------------------------------------
+# Light LCA Tool — Sign‑in First + Robust User Guide (fixed strings)
+# -----------------------------------------------------------------
+# Clean, minimal app with a gated sign‑in screen and a reliable
+# User Guide tab. Long strings use triple quotes to avoid
+# unterminated literal errors.
+# -----------------------------------------------------------------
 
 import io
 import re
@@ -20,27 +15,22 @@ from typing import Tuple, Optional, Dict, List
 import pandas as pd
 import streamlit as st
 
-# ---------- Basic page setup ----------
-st.set_page_config(
-    page_title="Light LCA Tool",
-    page_icon="🌱",
-    layout="wide",
-)
+# ---------- Page setup ----------
+st.set_page_config(page_title="Light LCA Tool", page_icon="🌿", layout="wide")
 
 PRIMARY = "#00A67E"
 
 st.markdown(
     f"""
     <style>
-    :root {{ --brand: {PRIMARY}; }}
-    .block-container {{ padding-top: 1.4rem; padding-bottom: 2.2rem; }}
-    .h1 {{ font-size: 1.8rem; font-weight: 800; margin-bottom: .25rem; }}
-    .sub {{ color: #64748b; margin-bottom: 1.1rem; }}
-    .card {{ border: 1px solid rgba(15,23,42,.06); border-radius: 14px; padding: 14px 16px; }}
-    .stButton>button {{ background: var(--brand)!important; color: #fff!important; border: 0!important; border-radius: 10px!important; }}
-    .muted {{ color: #6b7280; font-size: .9rem; }}
-    .center {{ display: flex; align-items: center; justify-content: center; height: 72vh; }}
-    .panel {{ max-width: 520px; width: 100%; border: 1px solid rgba(15,23,42,.08); border-radius: 16px; padding: 20px; box-shadow: 0 6px 20px rgba(0,0,0,.05); }}
+      :root {{ --brand: {PRIMARY}; }}
+      .block-container {{ padding-top: 1.4rem; padding-bottom: 2.2rem; }}
+      .h1 {{ font-size: 1.8rem; font-weight: 800; margin-bottom: .25rem; }}
+      .sub {{ color: #64748b; margin-bottom: 1.1rem; }}
+      .stButton>button {{ background: var(--brand)!important; color: #fff!important; border: 0!important; border-radius: 10px!important; }}
+      .center {{ display: flex; align-items: center; justify-content: center; min-height: 72vh; }}
+      .panel {{ max-width: 520px; width: 100%; border: 1px solid rgba(15,23,42,.08); border-radius: 16px; padding: 20px; box-shadow: 0 6px 20px rgba(0,0,0,.05); background: #fff; }}
+      .card {{ border: 1px solid rgba(15,23,42,.06); border-radius: 14px; padding: 14px 16px; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -71,27 +61,22 @@ def require_sign_in():
     u = current_user()
     if u:
         return
-    # Show a centered sign-in panel and stop execution
-    st.markdown("<div class='center'>", unsafe_allow_html=True)
-    with st.container():
-        st.markdown("<div class='panel'>", unsafe_allow_html=True)
-        st.markdown("<div class='h1'>🌿 Light LCA Tool</div>", unsafe_allow_html=True)
-        st.markdown("<div class='sub'>Please sign in to continue.</div>", unsafe_allow_html=True)
-        email = st.text_input("Email", key="email_input", placeholder="name@example.com")
-        name = st.text_input("Name (optional)", key="name_input")
-        colA, colB = st.columns([1,4])
-        with colA:
-            go = st.button("Continue")
-        with colB:
-            st.write("")
-        if go:
-            if email and re.match(r"^.+@.+\..+$", email):
-                st.session_state["user"] = {"email": email.strip(), "name": name.strip()}
-                st.experimental_rerun()
-            else:
-                st.error("Please enter a valid email address.")
-        st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("""
+    <div class='center'>
+      <div class='panel'>
+        <div class='h1'>🌿 Light LCA Tool</div>
+        <div class='sub'>Please sign in to continue.</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+    email = st.text_input("Email", key="email_input", placeholder="name@example.com")
+    name = st.text_input("Name (optional)", key="name_input")
+    if st.button("Continue"):
+        if email and re.match(r"^.+@.+\..+$", email):
+            st.session_state["user"] = {"email": email.strip(), "name": name.strip()}
+            st.experimental_rerun()
+        else:
+            st.error("Please enter a valid email address.")
     st.stop()
 
 
@@ -138,6 +123,7 @@ def save_uploaded_file(uploaded, out_path: Path) -> Path:
 
 
 def docx_to_html(doc_path: Path) -> Optional[str]:
+    """Return HTML for a DOCX using mammoth/python-docx if available."""
     try:
         import mammoth  # type: ignore
         with open(doc_path, "rb") as f:
@@ -147,7 +133,9 @@ def docx_to_html(doc_path: Path) -> Optional[str]:
         try:
             import docx  # type: ignore
             doc = docx.Document(str(doc_path))
-            text = "".join(p.text for p in doc.paragraphs)
+            text = "
+
+".join(p.text for p in doc.paragraphs)
             return f"<pre>{text}</pre>"
         except Exception:
             return None
@@ -156,7 +144,9 @@ def docx_to_html(doc_path: Path) -> Optional[str]:
 def embed_pdf(file_path: Path, height: int = 900):
     b64 = base64.b64encode(file_path.read_bytes()).decode("utf-8")
     st.markdown(
-        f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="{height}" type="application/pdf"></iframe>',
+        f"""
+        <iframe src="data:application/pdf;base64,{b64}" width="100%" height="{height}" type="application/pdf"></iframe>
+        """,
         unsafe_allow_html=True,
     )
 
@@ -167,7 +157,7 @@ require_sign_in()
 st.markdown("<div class='h1'>🌿 Light LCA Tool</div>", unsafe_allow_html=True)
 user = current_user()
 st.markdown(
-    f"<div class='sub'>Welcome {user.get('name') or user.get('email')} — upload your database, calculate, and open the guide.</div>",
+    f"<div class='sub'>Welcome {user.get('name') or user.get('email')}</div>",
     unsafe_allow_html=True,
 )
 
@@ -189,13 +179,11 @@ with TabDB:
         saved = save_uploaded_file(uploaded, user_db_path())
         try:
             dfp, dfm = read_excel_db(saved)
-            st.session_state["df_processes"] = dfp
-            st.session_state["df_materials"] = dfm
+            st.session_state["df_processes"], st.session_state["df_materials"] = dfp, dfm
             st.success("Database saved to your account.")
         except Exception as e:
             st.error(f"Failed to read Excel: {e}")
 
-    # lazy load if not yet in session
     if st.session_state.get("df_processes") is None:
         loaded = load_saved_db_for_user()
         if loaded:
@@ -220,7 +208,6 @@ with TabCalc:
     if df_proc is None or df_mat is None:
         st.info("No database loaded yet. Go to **Database** and upload your Excel.")
     else:
-        # find process name column
         name_col = next((c for c in ["Process", "Name", "Process Name", "process", "name"] if c in df_proc.columns), df_proc.columns[0])
         processes = df_proc[name_col].astype(str).tolist()
         c1, c2 = st.columns([2,1])
@@ -230,8 +217,7 @@ with TabCalc:
             qty = st.number_input("Quantity", min_value=0.0, value=1.0)
         fu = st.text_input("Functional unit", value="unit")
 
-        # impact columns
-        impact_cols = [c for c in df_proc.columns if re.search(r"(CO2|GHG|GWP|impact|emission)", str(c), re.I)]
+        impact_cols = [c for c in df_proc.columns if re.search(r"(CO2|CO₂|GHG|GWP|impact|emission)", str(c), re.I)]
         if not impact_cols:
             st.warning("No impact column detected. Add a column such as 'GWP (kg CO2e/unit)'.")
         else:
@@ -240,7 +226,10 @@ with TabCalc:
             if row.empty:
                 st.error("Selected process not found.")
             else:
-                factor = float(row.iloc[0][impact_col]) if pd.notna(row.iloc[0][impact_col]) else 0.0
+                try:
+                    factor = float(row.iloc[0][impact_col]) if pd.notna(row.iloc[0][impact_col]) else 0.0
+                except Exception:
+                    factor = 0.0
                 total = qty * factor
                 st.metric(label=f"Impact factor ({impact_col})", value=f"{factor:,.4f}")
                 st.metric(label=f"Total impact for {qty:g} {fu}", value=f"{total:,.4f}")
@@ -253,12 +242,10 @@ with TabGuide:
     st.markdown("### User Guide")
     st.caption("Place any DOCX/PDF files in ./guides (or upload below). They appear here automatically.")
 
-    # discover all docs dynamically
     def list_guide_files() -> List[Path]:
         docs = list(GUIDE_DIR.glob("*.docx")) + list(GUIDE_DIR.glob("*.pdf"))
         return sorted(docs, key=lambda p: p.name.lower())
 
-    # allow upload
     up = st.file_uploader("Add or replace a guide (DOCX or PDF)", type=["docx", "pdf"], key="guide_upl")
     if up is not None:
         dest = GUIDE_DIR / up.name
@@ -278,7 +265,7 @@ with TabGuide:
             else:
                 st.warning("Couldn't render DOCX inline (install 'mammoth' or 'python-docx').")
                 st.download_button("Download DOCX", data=chosen.read_bytes(), file_name=chosen.name)
-        else:  # pdf
+        else:
             try:
                 embed_pdf(chosen, height=900)
             except Exception:
@@ -323,4 +310,3 @@ with TabSet:
 # ---------------------------
 # End of file
 # ---------------------------
-
