@@ -1,12 +1,11 @@
-# Light LCA Tool — simple UI, no sign‑in, built‑in User Guide
+# Light LCA Tool — sign‑in first, simple UI, dynamic User Guide
 # ---------------------------------------------------------------
 # What’s new in this version
-# - Removed the sidebar sign‑in and per‑user folders.
-# - Much simpler layout (fewer cards, lighter header, no crowded dashboard).
-# - One global, persistent database file saved to ./data/lca_database.xlsx.
-# - Calculator reads directly from that Excel (sheets: Processes, Materials).
-# - User Guide tab renders your DOCX/PDF or lets you upload a guide at runtime.
-# - Optional preview toggle if you want to inspect raw tables.
+# - The very first screen is a **Sign in** form (email + optional name). Nothing else shows until you sign in.
+# - Clean, minimal layout with 5 tabs: Calculator, Database, User Guide, Reports, Settings.
+# - Per‑user database persistence: each user’s Excel DB is saved under ./data/<hash_of_email>/lca_database.xlsx.
+# - User Guide tab now lists **all** DOCX/PDF files in ./guides automatically (no fixed filenames).
+# - Optional preview toggle for raw tables.
 #
 # Drop this in as app.py and run:  streamlit run app.py
 # ---------------------------------------------------------------
@@ -14,8 +13,9 @@
 import io
 import re
 import base64
+import hashlib
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict, List
 
 import pandas as pd
 import streamlit as st
@@ -33,12 +33,14 @@ st.markdown(
     f"""
     <style>
     :root {{ --brand: {PRIMARY}; }}
-    .block-container {{ padding-top: 1.2rem; padding-bottom: 2.2rem; }}
-    .h1 {{ font-size: 1.6rem; font-weight: 800; margin-bottom: .25rem; }}
-    .sub {{ color: #64748b; margin-bottom: 1rem; }}
+    .block-container {{ padding-top: 1.4rem; padding-bottom: 2.2rem; }}
+    .h1 {{ font-size: 1.8rem; font-weight: 800; margin-bottom: .25rem; }}
+    .sub {{ color: #64748b; margin-bottom: 1.1rem; }}
     .card {{ border: 1px solid rgba(15,23,42,.06); border-radius: 14px; padding: 14px 16px; }}
     .stButton>button {{ background: var(--brand)!important; color: #fff!important; border: 0!important; border-radius: 10px!important; }}
     .muted {{ color: #6b7280; font-size: .9rem; }}
+    .center {{ display: flex; align-items: center; justify-content: center; height: 72vh; }}
+    .panel {{ max-width: 520px; width: 100%; border: 1px solid rgba(15,23,42,.08); border-radius: 16px; padding: 20px; box-shadow: 0 6px 20px rgba(0,0,0,.05); }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -57,6 +59,54 @@ MATERIALS_SHEET = "Materials"
 
 # ---------- Helpers ----------
 
+def _hash_email(email: str) -> str:
+    return hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()[:16]
+
+
+def current_user() -> Optional[Dict[str, str]]:
+    return st.session_state.get("user")
+
+
+def require_sign_in():
+    u = current_user()
+    if u:
+        return
+    # Show a centered sign-in panel and stop execution
+    st.markdown("<div class='center'>", unsafe_allow_html=True)
+    with st.container():
+        st.markdown("<div class='panel'>", unsafe_allow_html=True)
+        st.markdown("<div class='h1'>🌿 Light LCA Tool</div>", unsafe_allow_html=True)
+        st.markdown("<div class='sub'>Please sign in to continue.</div>", unsafe_allow_html=True)
+        email = st.text_input("Email", key="email_input", placeholder="name@example.com")
+        name = st.text_input("Name (optional)", key="name_input")
+        colA, colB = st.columns([1,4])
+        with colA:
+            go = st.button("Continue")
+        with colB:
+            st.write("")
+        if go:
+            if email and re.match(r"^.+@.+\..+$", email):
+                st.session_state["user"] = {"email": email.strip(), "name": name.strip()}
+                st.experimental_rerun()
+            else:
+                st.error("Please enter a valid email address.")
+        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.stop()
+
+
+def user_dir() -> Path:
+    u = current_user()
+    assert u and u.get("email"), "user must be signed in"
+    d = DATA_DIR / _hash_email(u["email"]) 
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def user_db_path() -> Path:
+    return user_dir() / DEFAULT_DB_NAME
+
+
 def read_excel_db(path: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
     xl = pd.ExcelFile(path)
     if PROCESSES_SHEET not in xl.sheet_names:
@@ -70,8 +120,8 @@ def read_excel_db(path: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
     return df_proc, df_mat
 
 
-def load_saved_db() -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
-    path = DATA_DIR / DEFAULT_DB_NAME
+def load_saved_db_for_user() -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
+    path = user_db_path()
     if path.exists():
         try:
             return read_excel_db(path)
@@ -112,37 +162,44 @@ def embed_pdf(file_path: Path, height: int = 900):
         unsafe_allow_html=True,
     )
 
-# ---------- Header ----------
-st.markdown("<div class='h1'>🌿 Light LCA Tool</div>", unsafe_allow_html=True)
-st.markdown("<div class='sub'>Fast, simple, and focused. Upload one Excel with your data, calculate, and read the guide—all in one place.</div>", unsafe_allow_html=True)
+# ---------- Gate: sign-in first ----------
+require_sign_in()
 
-# ---------- Tabs (kept minimal) ----------
+# ---------- Header (after sign-in) ----------
+st.markdown("<div class='h1'>🌿 Light LCA Tool</div>", unsafe_allow_html=True)
+user = current_user()
+st.markdown(
+    f"<div class='sub'>Welcome {user.get('name') or user.get('email')} — upload your database, calculate, and open the guide.</div>",
+    unsafe_allow_html=True,
+)
+
+# ---------- Tabs ----------
 TAB_TITLES = ["Calculator", "Database", "User Guide", "Reports", "Settings"]
 TabCalc, TabDB, TabGuide, TabRep, TabSet = st.tabs(TAB_TITLES)
 
 # =============================
-# Database (simple and global)
+# Database (per‑user, simple)
 # =============================
 with TabDB:
     st.markdown("### Database")
-    st.caption("One Excel workbook with sheets named 'Processes' and 'Materials'.")
+    st.caption("Upload one Excel workbook with sheets named 'Processes' and 'Materials'. Your file is saved to your account.")
 
-    uploaded = st.file_uploader("Upload/replace database (.xlsx)", type=["xlsx"], accept_multiple_files=False)
+    uploaded = st.file_uploader("Upload/replace my database (.xlsx)", type=["xlsx"], accept_multiple_files=False)
     preview = st.toggle("Preview tables after upload", value=False)
 
     if uploaded is not None:
-        saved = save_uploaded_file(uploaded, DATA_DIR / DEFAULT_DB_NAME)
+        saved = save_uploaded_file(uploaded, user_db_path())
         try:
             dfp, dfm = read_excel_db(saved)
             st.session_state["df_processes"] = dfp
             st.session_state["df_materials"] = dfm
-            st.success("Database saved. It will persist in ./data/lca_database.xlsx")
+            st.success("Database saved to your account.")
         except Exception as e:
             st.error(f"Failed to read Excel: {e}")
 
     # lazy load if not yet in session
     if st.session_state.get("df_processes") is None:
-        loaded = load_saved_db()
+        loaded = load_saved_db_for_user()
         if loaded:
             st.session_state["df_processes"], st.session_state["df_materials"] = loaded
 
@@ -163,7 +220,7 @@ with TabCalc:
     df_mat = st.session_state.get("df_materials")
 
     if df_proc is None or df_mat is None:
-        st.info("No database loaded yet. Upload your Excel in the **Database** tab.")
+        st.info("No database loaded yet. Go to **Database** and upload your Excel.")
     else:
         # find process name column
         name_col = next((c for c in ["Process", "Name", "Process Name", "process", "name"] if c in df_proc.columns), df_proc.columns[0])
@@ -192,19 +249,16 @@ with TabCalc:
                 st.caption("Tip: Add more impact columns (e.g., energy, water) and select them here.")
 
 # =============================
-# User Guide (inline viewer)
+# User Guide (auto-detect all files)
 # =============================
 with TabGuide:
     st.markdown("### User Guide")
-    st.caption("Render a DOCX/PDF guide inline, or upload one now.")
+    st.caption("Place any DOCX/PDF files in ./guides (or upload below). They appear here automatically.")
 
-    # known file names (place in ./guides or upload below)
-    candidates = [
-        GUIDE_DIR/"LCA-Light Usage Overview (1).docx",
-        GUIDE_DIR/"Text_Report of the Easy LCA Tool (1).docx",
-        GUIDE_DIR/"LCA Tool Redesign V2 (1).pdf",
-        GUIDE_DIR/"LCA Tool.pdf",
-    ]
+    # discover all docs dynamically
+    def list_guide_files() -> List[Path]:
+        docs = list(GUIDE_DIR.glob("*.docx")) + list(GUIDE_DIR.glob("*.pdf"))
+        return sorted(docs, key=lambda p: p.name.lower())
 
     # allow upload
     up = st.file_uploader("Add or replace a guide (DOCX or PDF)", type=["docx", "pdf"], key="guide_upl")
@@ -212,9 +266,8 @@ with TabGuide:
         dest = GUIDE_DIR / up.name
         save_uploaded_file(up, dest)
         st.success(f"Saved guide: {up.name}")
-        candidates.insert(0, dest)
 
-    found = [p for p in candidates if p.exists()]
+    found = list_guide_files()
     if not found:
         st.info("No guide found yet. Upload a DOCX/PDF above or place files into ./guides")
     else:
@@ -227,7 +280,7 @@ with TabGuide:
             else:
                 st.warning("Couldn't render DOCX inline (install 'mammoth' or 'python-docx').")
                 st.download_button("Download DOCX", data=chosen.read_bytes(), file_name=chosen.name)
-        else:
+        else:  # pdf
             try:
                 embed_pdf(chosen, height=900)
             except Exception:
@@ -250,10 +303,19 @@ with TabRep:
         st.download_button("Download current DB (xlsx)", data=data, file_name="lca_current_db.xlsx")
 
 # =============================
-# Settings (simple tools)
+# Settings (sign out, clear cache)
 # =============================
 with TabSet:
     st.markdown("### Settings")
+    if st.button("Sign out"):
+        if "user" in st.session_state:
+            del st.session_state["user"]
+        for k in ["df_processes", "df_materials"]:
+            if k in st.session_state:
+                del st.session_state[k]
+        st.success("Signed out.")
+        st.experimental_rerun()
+
     if st.button("Clear in‑memory data"):
         for k in ["df_processes", "df_materials"]:
             if k in st.session_state:
