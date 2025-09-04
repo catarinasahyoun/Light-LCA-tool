@@ -310,7 +310,8 @@ if "assessment" not in st.session_state:
 with st.sidebar:
     st.markdown(f"<div style='display:flex;justify-content:center;margin-bottom:10px'>{logo_tag(64)}</div>", unsafe_allow_html=True)
     if st.session_state.auth_user:
-        page = st.radio("Navigate", ["Inputs", "Workspace", "User Guide", "Settings"], index=0)
+        # Make User Guide FIRST after sign-in
+        page = st.radio("Navigate", ["User Guide", "Inputs", "Workspace", "Settings"], index=0)
         st.markdown("<div class='nav-note'>Workspace order: Results & Comparison → Final Summary → Report → Versions.</div>", unsafe_allow_html=True)
     else:
         page = "Sign in"
@@ -792,7 +793,7 @@ if page == "Workspace":
             "</p>",
             unsafe_allow_html=True
         )
-        st.markdown("#### End‑of‑Life Summary")
+        st.markdown("#### End-of-Life Summary")
         for k, v in R['eol_summary'].items():
             st.write(f"• **{k}** — {v}")
 
@@ -914,33 +915,136 @@ if page == "Workspace":
                     st.success(msg) if ok else st.error(msg)
 
 # -----------------------------
-# USER GUIDE (download-first)
+# USER GUIDE (render + downloads) — FIRST after sign-in
 # -----------------------------
+def _find_first_existing(paths: List[Path]) -> Optional[Path]:
+    for p in paths:
+        if p.exists():
+            return p
+    return None
+
+def _docx_to_markdown(doc_path: Path) -> str:
+    """Lightweight DOCX → Markdown-ish converter for headings, bullets, paragraphs, and simple tables."""
+    if not DOCX_OK:
+        return ""
+    from docx import Document  # local import to avoid errors when library missing
+    doc = Document(str(doc_path))
+
+    lines: List[str] = []
+
+    # Paragraphs: headings, bullets, numbers, body
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if not text:
+            lines.append("")
+            continue
+
+        style = (para.style.name or "").lower()
+
+        # Headings
+        if "heading 1" in style:
+            lines.append(f"# {text}")
+            continue
+        if "heading 2" in style:
+            lines.append(f"## {text}")
+            continue
+        if "heading 3" in style:
+            lines.append(f"### {text}")
+            continue
+
+        # Bullets / numbered
+        if "list bullet" in style or "bullet" in style:
+            lines.append(f"- {text}")
+            continue
+        if "list number" in style or "number" in style:
+            lines.append(f"1. {text}")
+            continue
+
+        # Body
+        lines.append(text)
+
+    # Very simple table rendering
+    for tbl in doc.tables:
+        if tbl.rows:
+            header_cells = [c.text.strip() for c in tbl.rows[0].cells]
+            if any(h for h in header_cells):
+                lines.append("")
+                lines.append("| " + " | ".join(header_cells) + " |")
+                lines.append("| " + " | ".join(["---"] * len(header_cells)) + " |")
+                for r in tbl.rows[1:]:
+                    cells = [c.text.strip() for c in r.cells]
+                    lines.append("| " + " | ".join(cells) + " |")
+                lines.append("")
+
+    return "\n".join(lines).strip()
+
 if page == "User Guide":
     st.subheader("User Guide")
-    st.caption("Upload your PDFs/DOCX to <code>assets/guides/</code>. Files here persist until you change them.")
+    st.caption(
+        "Files in <code>assets/guides/</code> persist. This page renders the overview and lets you download the rest.",
+        help="DOCX is rendered inline below if available; PDFs are offered as downloads.",
+    )
 
-    def show_download(label: str, candidates: List[Path]):
-        for p in candidates:
-            if p.exists():
-                st.markdown(f"**{label}** — {p.name}")
-                st.download_button("Download", data=p.read_bytes(), file_name=p.name)
-                return True
+    # Candidates
+    lca_light_candidates = [
+        GUIDES / "LCA-Light Usage Overview.docx",
+        GUIDES / "LCA-Light Usage Overview (1).docx",
+        Path("/mnt/data/LCA-Light Usage Overview (1).docx"),
+    ]
+    text_report_candidates = [
+        GUIDES / "Text_Report of the Easy LCA Tool.docx",
+        GUIDES / "Text_Report of the Easy LCA Tool (1).docx",
+        Path("/mnt/data/Text_Report of the Easy LCA Tool (1).docx"),
+    ]
+    redesign_pdf_candidates = [
+        GUIDES / "LCA Tool Redesign V2.pdf",
+        GUIDES / "LCA Tool Redesign V2 (1).pdf",
+        Path("/mnt/data/LCA Tool Redesign V2 (1).pdf"),
+    ]
+    slides_pdf_candidates = [
+        GUIDES / "LCA Tool.pdf",
+        Path("/mnt/data/LCA Tool.pdf"),
+    ]
+
+    # 1) Render the LCA-Light Usage Overview inline
+    st.markdown("### 📘 LCA-Light Usage Overview (inline)")
+    docx_path = _find_first_existing(lca_light_candidates)
+
+    if docx_path and DOCX_OK:
+        try:
+            md = _docx_to_markdown(docx_path)
+            if md:
+                st.markdown(md)
+            else:
+                st.warning("Could not render the DOCX content (empty result). You can still download the file below.")
+        except Exception as e:
+            st.error(f"Failed to render the DOCX: {e}")
+    else:
+        if not DOCX_OK:
+            st.warning("`python-docx` is not available, so inline rendering is disabled.")
+        else:
+            st.info("Couldn’t find the LCA-Light Usage Overview DOCX in assets/guides or /mnt/data.")
+
+    st.divider()
+
+    # 2) Download section for all guides
+    st.markdown("### ⬇️ Downloads")
+
+    def show_download(label: str, candidates: List[Path]) -> bool:
+        p = _find_first_existing(candidates)
+        if p:
+            st.markdown(f"**{label}** — {p.name}")
+            st.download_button("Download", data=p.read_bytes(), file_name=p.name)
+            return True
         return False
 
     found_any = False
-    docs = [
-        ("LCA-Light Usage Overview", [GUIDES/"LCA-Light Usage Overview.docx", GUIDES/"LCA-Light Usage Overview (1).docx", Path("/mnt/data/LCA-Light Usage Overview (1).docx")]),
-        ("Text Report of the Easy LCA Tool", [GUIDES/"Text_Report of the Easy LCA Tool.docx", GUIDES/"Text_Report of the Easy LCA Tool (1).docx", Path("/mnt/data/Text_Report of the Easy LCA Tool (1).docx")]),
-        ("LCA Tool Redesign V2", [GUIDES/"LCA Tool Redesign V2.pdf", GUIDES/"LCA Tool Redesign V2 (1).pdf", Path("/mnt/data/LCA Tool Redesign V2 (1).pdf")]),
-        ("LCA Tool (slides)", [GUIDES/"LCA Tool.pdf", Path("/mnt/data/LCA Tool.pdf")]),
-    ]
-    for label, cands in docs:
-        if show_download(label, cands):
-            found_any = True
+    found_any |= show_download("LCA-Light Usage Overview (DOCX)", lca_light_candidates)
+    found_any |= show_download("Text Report of the Easy LCA Tool (DOCX)", text_report_candidates)
+    found_any |= show_download("LCA Tool Redesign V2 (PDF)", redesign_pdf_candidates)
+    found_any |= show_download("LCA Tool (slides PDF)", slides_pdf_candidates)
 
     if not found_any:
         st.info("No guide files found yet. Place your PDFs/DOCX in 'assets/guides' and refresh.")
 
-    # Stay within the User Guide page and end execution cleanly
     st.stop()
