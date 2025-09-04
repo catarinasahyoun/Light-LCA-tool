@@ -133,7 +133,9 @@ def docx_to_html(doc_path: Path) -> Optional[str]:
         try:
             import docx  # type: ignore
             doc = docx.Document(str(doc_path))
-            text = "".join(p.text for p in doc.paragraphs)
+            text = "
+
+".join(p.text for p in doc.paragraphs)
             return f"<pre>{text}</pre>"
         except Exception:
             return None
@@ -308,4 +310,3 @@ with TabSet:
 # ---------------------------
 # End of file
 # ---------------------------
-
