@@ -32,12 +32,21 @@ PURPLE = ['#5B21B6','#6D28D9','#7C3AED','#8B5CF6','#A78BFA','#C4B5FD']
 # -----------------------------
 # Folders & small helpers
 # -----------------------------
-ASSETS = Path("assets"); ASSETS.mkdir(exist_ok=True)
-DB_ROOT = ASSETS / "databases"; DB_ROOT.mkdir(parents=True, exist_ok=True)
-USERS_FILE = ASSETS / "users.json"
+from pathlib import Path
+from datetime import datetime
 
-DATA_DIR = Path("data"); DATA_DIR.mkdir(exist_ok=True)
-GUIDE_DIR = Path("guides"); GUIDE_DIR.mkdir(exist_ok=True)
+def ensure_dir(p: Path):
+    # If something already exists at this path and it's not a directory,
+    # move it out of the way so we can create the directory.
+    if p.exists() and not p.is_dir():
+        backup = p.with_name(f"{p.name}_conflict_{datetime.now().strftime('%Y%m%d%H%M%S')}")
+        p.rename(backup)
+    p.mkdir(parents=True, exist_ok=True)
+ASSETS = Path("assets"); ensure_dir(ASSETS)
+DB_ROOT = ASSETS / "databases"; ensure_dir(DB_ROOT)
+DATA_DIR = Path("data"); ensure_dir(DATA_DIR)
+GUIDE_DIR = Path("guides"); ensure_dir(GUIDE_DIR)
+
 
 DEFAULT_DB_NAME = "lca_database.xlsx"
 PROCESSES_SHEET = "Processes"
@@ -456,3 +465,4 @@ with Tabs[5]:
         st.caption("No saved database yet.")
 
     st.markdown("</div>", unsafe_allow_html=True)
+
