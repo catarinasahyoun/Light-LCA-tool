@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -8,17 +7,15 @@ from pathlib import Path
 from typing import Optional
 
 # =============================================================
-# TCHAI — Easy LCA Indicator (full app, robust Inputs)
-# - Front-page Sign-in (no self-signup) with 3 pre-created users:
-#   sustainability@tchai.nl / ChangeMe123!
-#   jillderegt@tchai.nl     / ChangeMe123!
-#   veravanbeaumont@tchai.nl/ ChangeMe123!
-# - Avatar menu: change password + sign out
-# - Sidebar: only the TCHAI logo + navigation (Inputs, Workspace, Settings)
-# - Inputs: robust sheet detection, tolerant column parsing, preview, session override upload
-# - Workspace tabs: Results, Comparison (purple), Final Summary, Report (HTML), Versions (save/load/delete)
-# - Settings: Database Manager (upload .xlsx, list, activate)
-# - B&W UI, purple charts; safe folder creation; st.rerun compatibility
+# TCHAI — Easy LCA Indicator (Persist DB + User Guide)
+# - Sign-in (3 pre-created users)
+# - Database persists until you change it (Settings → Database Manager)
+# - Inputs page: tolerant sheet parsing; optional per-session override
+# - Workspace tabs: Results & Comparison (together), Final Summary, Report, Versions
+# - Settings: Database Manager (upload/list/activate/delete)
+# - User Guide page: shows uploaded docs (PDF/DOCX) if present + downloads
+# - Robust folder creation (no FileExistsError)
+# - B&W UI, purple charts
 # =============================================================
 
 st.set_page_config(
@@ -29,8 +26,9 @@ st.set_page_config(
 )
 
 # -----------------------------
-# Assets (robust) + Users + DB paths
+# Safe dir helper
 # -----------------------------
+
 def ensure_dir(p: Path):
     """Ensure 'p' is a directory; if a file blocks the path, rename it and create the dir."""
     if p.exists() and not p.is_dir():
@@ -38,36 +36,24 @@ def ensure_dir(p: Path):
         p.rename(backup)
     p.mkdir(parents=True, exist_ok=True)
 
-ASSETS = Path("assets")
-ensure_dir(ASSETS)
-
-DB_ROOT = ASSETS / "databases"
-ensure_dir(DB_ROOT)
-
+BASE = Path.cwd()
+ASSETS = BASE / "assets"; ensure_dir(ASSETS)
+DB_ROOT = ASSETS / "databases"; ensure_dir(DB_ROOT)
+GUIDES = ASSETS / "guides"; ensure_dir(GUIDES)
 USERS_FILE = ASSETS / "users.json"
-ACTIVE_DB_FILE = DB_ROOT / "active.json"  # stores {"path": "<active .xlsx>"}
-
-# -----------------------------
-# Rerun helper (compat)
-# -----------------------------
-def _rerun():
-    if hasattr(st, "rerun"):
-        st.rerun()
-    else:  # pragma: no cover
-        try:
-            st.experimental_rerun()
-        except Exception:
-            pass
+ACTIVE_DB_FILE = DB_ROOT / "active.json"  # stores {"path": "...xlsx"}
 
 # -----------------------------
 # Branding (logo)
 # -----------------------------
-LOGO_PATHS = [ASSETS / "tchai_logo.png", Path("tchai_logo.png")]
+LOGO_CANDIDATES = [ASSETS / "tchai_logo.png", Path("tchai_logo.png"), Path("/mnt/data/tchai_logo.png")]
 _logo_bytes = None
-for p in LOGO_PATHS:
+for p in LOGO_CANDIDATES:
     if p.exists():
-        _logo_bytes = p.read_bytes()
-        break
+        try:
+            _logo_bytes = p.read_bytes(); break
+        except Exception:
+            pass
 
 def logo_tag(height=86):
     if not _logo_bytes:
@@ -98,8 +84,22 @@ st.markdown(
 )
 
 # -----------------------------
-# Auth helpers & bootstrap (3 users)
+# Rerun helper
 # -----------------------------
+
+def _rerun():
+    if hasattr(st, "rerun"):
+        st.rerun()
+    else:
+        try:
+            st.experimental_rerun()
+        except Exception:
+            pass
+
+# -----------------------------
+# Auth (3 pre-created users)
+# -----------------------------
+
 def _load_users() -> dict:
     try:
         return json.loads(USERS_FILE.read_text())
@@ -110,9 +110,11 @@ def _save_users(users: dict):
     USERS_FILE.write_text(json.dumps(users, indent=2))
 
 def _hash(pw: str, salt: str) -> str:
+    import hashlib
     return hashlib.sha256((salt + pw).encode()).hexdigest()
 
 def _initials(name: str) -> str:
+    import re
     parts = [p for p in re.split(r"\s+|_+|\.+|@", name) if p]
     return ((parts[0][0] if parts else "U") + (parts[1][0] if len(parts) > 1 else "")).upper()
 
@@ -128,28 +130,181 @@ def bootstrap_users_if_needed():
     ]
     out = {}
     for email in emails:
+        import secrets
         salt = secrets.token_hex(8)
-        out[email] = {
-            "salt": salt,
-            "hash": _hash(default_pw, salt),
-            "created_at": datetime.now().isoformat()
-        }
+        out[email] = {"salt": salt, "hash": _hash(default_pw, salt), "created_at": datetime.now().isoformat()}
     _save_users(out)
 
 bootstrap_users_if_needed()
-
 if "auth_user" not in st.session_state:
     st.session_state.auth_user = None
 
 # -----------------------------
-# Sidebar (logo only + nav)
+# Database persistence helpers
+# -----------------------------
+
+def list_databases():
+    return sorted(DB_ROOT.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+def set_active_database(path: Path):
+    ACTIVE_DB_FILE.write_text(json.dumps({"path": str(path)}))
+    st.success(f"Activated database: {path.name}")
+    _rerun()
+
+def get_active_database_path() -> Optional[Path]:
+    # 1) explicit active.json
+    if ACTIVE_DB_FILE.exists():
+        try:
+            data = json.loads(ACTIVE_DB_FILE.read_text())
+            p = Path(data.get("path", ""))
+            if p.exists():
+                return p
+        except Exception:
+            pass
+    # 2) newest uploaded in assets/databases/
+    dbs = list_databases()
+    if dbs:
+        return dbs[0]
+    # 3) bundled fallbacks
+    for candidate in [ASSETS / "Refined database.xlsx", Path("Refined database.xlsx"), Path("database.xlsx")]:
+        if candidate.exists():
+            return candidate
+    return None
+
+def load_active_excel() -> Optional[pd.ExcelFile]:
+    p = get_active_database_path()
+    if p and p.exists():
+        try:
+            return pd.ExcelFile(str(p))
+        except Exception as e:
+            st.error(f"Failed to open Excel: {p.name} — {e}")
+            return None
+    return None
+
+# -----------------------------
+# Parsing helpers (tolerant)
+# -----------------------------
+
+def extract_number(v):
+    try:
+        return float(v)
+    except Exception:
+        s = str(v).replace(',', '.')
+        m = re.search(r"[-+]?\d*\.?\d+", s)
+        return float(m.group()) if m else 0.0
+
+
+def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [re.sub(r"\s+", " ", str(c).strip()).lower().replace("co₂", "co2").replace("₂","2") for c in df.columns]
+    return df
+
+
+def _find_sheet(xls: pd.ExcelFile, target: str) -> Optional[str]:
+    names = xls.sheet_names
+    # exact
+    for n in names:
+        if n == target:
+            return n
+    # trimmed / case-insensitive
+    t = re.sub(r"\s+", "", target.lower())
+    for n in names:
+        if re.sub(r"\s+", "", n.lower()) == t:
+            return n
+    # partial
+    for n in names:
+        if target.lower() in n.lower():
+            return n
+    return None
+
+
+def parse_materials(df_raw: pd.DataFrame) -> dict:
+    if df_raw is None or df_raw.empty:
+        return {}
+    df = _normalize_cols(df_raw)
+
+    def pick(aliases):
+        for a in aliases:
+            if a in df.columns:
+                return a
+        return None
+
+    col_name = pick(["material name","material","name"])
+    col_co2  = pick(["co2e (kg)","co2e/kg","co2e","co2e per kg","co2 (kg)","emission factor"])
+    col_rc   = pick(["recycled content","recycled content (%)","recycled","recycled %"])  
+    col_eol  = pick(["eol","end of life"]) 
+    col_life = pick(["lifetime","life","lifespan","lifetime (years)"]) 
+    col_circ = pick(["circularity","circ"]) 
+
+    if not col_name or not col_co2:
+        return {}
+
+    out = {}
+    for _, r in df.iterrows():
+        name = (str(r[col_name]).strip() if pd.notna(r[col_name]) else "")
+        if not name:
+            continue
+        out[name] = {
+            "CO₂e (kg)": extract_number(r[col_co2]) if pd.notna(r[col_co2]) else 0.0,
+            "Recycled Content": extract_number(r[col_rc]) if col_rc and pd.notna(r.get(col_rc, None)) else 0.0,
+            "EoL": str(r[col_eol]).strip() if col_eol and pd.notna(r.get(col_eol, None)) else "Unknown",
+            "Lifetime": str(r[col_life]).strip() if col_life and pd.notna(r.get(col_life, None)) else "Unknown",
+            "Circularity": str(r[col_circ]).strip() if col_circ and pd.notna(r.get(col_circ, None)) else "Unknown",
+        }
+    return out
+
+
+def parse_processes(df_raw: pd.DataFrame) -> dict:
+    if df_raw is None or df_raw.empty:
+        return {}
+    df = _normalize_cols(df_raw)
+
+    def pick(aliases):
+        for a in aliases:
+            if a in df.columns:
+                return a
+        return None
+
+    col_proc = pick(["process","step","operation"]) 
+    col_co2  = pick(["co2e","co2e (kg)","co2","emission","factor"]) 
+    col_unit = pick(["unit","uom","units"]) 
+
+    if not col_proc or not col_co2:
+        return {}
+
+    out = {}
+    for _, r in df.iterrows():
+        name = (str(r[col_proc]).strip() if pd.notna(r[col_proc]) else "")
+        if not name:
+            continue
+        out[name] = {
+            "CO₂e": extract_number(r[col_co2]) if pd.notna(r[col_co2]) else 0.0,
+            "Unit": str(r[col_unit]).strip() if col_unit and pd.notna(r.get(col_unit, None)) else "",
+        }
+    return out
+
+# -----------------------------
+# Session storage
+# -----------------------------
+if "materials" not in st.session_state: st.session_state.materials = {}
+if "processes" not in st.session_state: st.session_state.processes = {}
+if "assessment" not in st.session_state:
+    st.session_state.assessment = {
+        "lifetime_weeks": 52,
+        "selected_materials": [],
+        "material_masses": {},
+        "processing_data": {}
+    }
+
+# -----------------------------
+# Sidebar (logo + nav)
 # -----------------------------
 with st.sidebar:
     st.markdown(f"<div style='display:flex;justify-content:center;margin-bottom:10px'>{logo_tag(64)}</div>",
                 unsafe_allow_html=True)
     if st.session_state.auth_user:
-        page = st.radio("Navigate", ["Inputs", "Workspace", "Settings"], index=0)
-        st.markdown("<div class='nav-note'>Inputs are separate. Workspace contains Results, Comparison, Final Summary, Report & Versions.</div>",
+        page = st.radio("Navigate", ["Inputs", "Workspace", "User Guide", "Settings"], index=0)
+        st.markdown("<div class='nav-note'>Inputs are separate. Workspace contains Results & Comparison, Final Summary, Report & Versions.</div>",
                     unsafe_allow_html=True)
     else:
         page = "Sign in"
@@ -200,7 +355,7 @@ with cr:
                 _rerun()
 
 # -----------------------------
-# Front-page Sign-in (hard gate)
+# Sign-in gate
 # -----------------------------
 if not st.session_state.auth_user:
     st.markdown("### Sign in to continue")
@@ -230,163 +385,58 @@ if not st.session_state.auth_user:
 # =============================
 
 # -----------------------------
-# Database management (robust)
+# SETTINGS → Database Manager (persist once until changed)
 # -----------------------------
-def list_databases():
-    return sorted((ASSETS / "databases").glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
-
-def set_active_database(path: Path):
-    ACTIVE_DB_FILE.write_text(json.dumps({"path": str(path)}))
-    st.success(f"Activated database: {path.name}")
-    _rerun()
-
-def get_active_database_path() -> Optional[Path]:
-    # 1) explicit active.json
-    if ACTIVE_DB_FILE.exists():
+if page == "Settings":
+    st.subheader("Database Manager")
+    st.caption("Upload your Excel once. It becomes the active database until you change it here.")
+    up = st.file_uploader("Upload Excel (.xlsx)", type=["xlsx"], key="db_upload")
+    if up is not None:
         try:
-            data = json.loads(ACTIVE_DB_FILE.read_text())
-            p = Path(data.get("path", ""))
-            if p.exists():
-                return p
-        except Exception:
-            pass
-    # 2) newest uploaded in assets/databases/
-    dbs = list_databases()
-    if dbs:
-        return dbs[0]
-    # 3) bundled fallbacks
-    for candidate in [ASSETS / "Refined database.xlsx",
-                      Path("Refined database.xlsx"),
-                      Path("database.xlsx")]:
-        if candidate.exists():
-            return candidate
-    return None
-
-def load_active_excel() -> Optional[pd.ExcelFile]:
-    p = get_active_database_path()
-    if p and p.exists():
-        try:
-            return pd.ExcelFile(str(p))
+            # Save to assets/databases with timestamped name
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            dest = DB_ROOT / f"database_{ts}.xlsx"
+            dest.write_bytes(up.read())
+            set_active_database(dest)
         except Exception as e:
-            st.error(f"Failed to open Excel: {p.name} — {e}")
-            return None
-    return None
+            st.error(f"Upload failed: {e}")
+
+    st.markdown("### Available Databases")
+    dbs = list_databases()
+    if not dbs:
+        st.info("No databases found. Upload one above.")
+    else:
+        active = get_active_database_path()
+        for p in dbs:
+            cols = st.columns([0.5,0.2,0.2,0.1])
+            with cols[0]:
+                st.write(f"**{p.name}**  ")
+                st.caption(f"{datetime.fromtimestamp(p.stat().st_mtime).strftime('%Y-%m-%d %H:%M')}")
+            with cols[1]:
+                if active and p.samefile(active):
+                    st.success("Active")
+                else:
+                    if st.button("Activate", key=f"act_{p.name}"):
+                        set_active_database(p)
+            with cols[2]:
+                if st.button("Download", key=f"dl_{p.name}"):
+                    st.download_button("Click to download", data=p.read_bytes(), file_name=p.name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            with cols[3]:
+                if st.button("🗑️", key=f"rm_{p.name}"):
+                    try:
+                        if active and p.samefile(active):
+                            st.warning("Cannot delete the active database. Activate another first.")
+                        else:
+                            p.unlink(missing_ok=True)
+                            st.success("Deleted.")
+                            _rerun()
+                    except Exception as e:
+                        st.error(f"Delete failed: {e}")
 
 # -----------------------------
-# Parsing helpers (tolerant)
-# -----------------------------
-def extract_number(v):
-    try:
-        return float(v)
-    except Exception:
-        s = str(v).replace(',', '.')
-        m = re.search(r"[-+]?\d*\.?\d+", s)
-        return float(m.group()) if m else 0.0
-
-def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = [re.sub(r"\s+", " ", str(c).strip()).lower() for c in df.columns]
-    return df
-
-def _find_sheet(xls: pd.ExcelFile, target: str) -> Optional[str]:
-    names = xls.sheet_names
-    # exact
-    for n in names:
-        if n == target:
-            return n
-    # trimmed / case-insensitive
-    t = re.sub(r"\s+", "", target.lower())
-    for n in names:
-        if re.sub(r"\s+", "", n.lower()) == t:
-            return n
-    # partial
-    for n in names:
-        if target.lower() in n.lower():
-            return n
-    return None
-
-def parse_materials(df_raw: pd.DataFrame) -> dict:
-    if df_raw is None or df_raw.empty:
-        return {}
-    df = _normalize_cols(df_raw)
-
-    def pick(aliases):
-        for a in aliases:
-            if a in df.columns:
-                return a
-        return None
-
-    col_name = pick(["material name","material","name"])
-    col_co2  = pick(["co2e (kg)","co2e/kg","co2e","co2e per kg","co2 (kg)","emission factor"])
-    col_rc   = pick(["recycled content","recycled content (%)","recycled","recycled %"])
-    col_eol  = pick(["eol","end of life"])
-    col_life = pick(["lifetime","life","lifespan","lifetime (years)"])
-    col_circ = pick(["circularity","circ"])
-
-    if not col_name or not col_co2:
-        return {}
-
-    out = {}
-    for _, r in df.iterrows():
-        name = (str(r[col_name]).strip() if pd.notna(r[col_name]) else "")
-        if not name:
-            continue
-        out[name] = {
-            "CO₂e (kg)": extract_number(r[col_co2]) if pd.notna(r[col_co2]) else 0.0,
-            "Recycled Content": extract_number(r[col_rc]) if col_rc and pd.notna(r.get(col_rc, None)) else 0.0,
-            "EoL": str(r[col_eol]).strip() if col_eol and pd.notna(r.get(col_eol, None)) else "Unknown",
-            "Lifetime": str(r[col_life]).strip() if col_life and pd.notna(r.get(col_life, None)) else "Unknown",
-            "Circularity": str(r[col_circ]).strip() if col_circ and pd.notna(r.get(col_circ, None)) else "Unknown",
-        }
-    return out
-
-def parse_processes(df_raw: pd.DataFrame) -> dict:
-    if df_raw is None or df_raw.empty:
-        return {}
-    df = _normalize_cols(df_raw)
-
-    def pick(aliases):
-        for a in aliases:
-            if a in df.columns:
-                return a
-        return None
-
-    col_proc = pick(["process","step","operation"])
-    col_co2  = pick(["co2e","co2e (kg)","co2","emission","factor"])
-    col_unit = pick(["unit","uom"])
-
-    if not col_proc or not col_co2:
-        return {}
-
-    out = {}
-    for _, r in df.iterrows():
-        name = (str(r[col_proc]).strip() if pd.notna(r[col_proc]) else "")
-        if not name:
-            continue
-        out[name] = {
-            "CO₂e": extract_number(r[col_co2]) if pd.notna(r[col_co2]) else 0.0,
-            "Unit": str(r[col_unit]).strip() if col_unit and pd.notna(r.get(col_unit, None)) else "",
-        }
-    return out
-
-# -----------------------------
-# Session storage
-# -----------------------------
-if "materials" not in st.session_state: st.session_state.materials = {}
-if "processes" not in st.session_state: st.session_state.processes = {}
-if "assessment" not in st.session_state:
-    st.session_state.assessment = {
-        "lifetime_weeks": 52,
-        "selected_materials": [],
-        "material_masses": {},
-        "processing_data": {}
-    }
-
-# -----------------------------
-# Inputs (status + tolerant parsing + override uploader)
+# INPUTS (tolerant parsing; optional override)
 # -----------------------------
 if page == "Inputs":
-    # Show current active DB + optional session override
     active_path = get_active_database_path()
     st.subheader("Database status")
     c0, c1 = st.columns([0.6, 0.4])
@@ -394,7 +444,7 @@ if page == "Inputs":
         if active_path:
             st.success(f"Active database: **{active_path.name}**")
         else:
-            st.error("No active database found.")
+            st.error("No active database found. Go to Settings → Database Manager.")
     with c1:
         st.caption("Quick override (optional)")
         override = st.file_uploader("Use a different Excel for this session", type=["xlsx"], key="override_db")
@@ -446,8 +496,7 @@ if page == "Inputs":
     parsed_count = len(st.session_state.materials or {})
     st.info(f"Parsed **{parsed_count}** materials from '{mat_choice}'.")
     if parsed_count == 0:
-        st.warning("No materials parsed. Please check your column names. "
-                   "Accepted aliases include: Material name/material/name, CO2e (kg)/CO2e, Recycled Content, EoL, Lifetime, Circularity.")
+        st.warning("No materials parsed. Please check your column names. Accepted aliases include: Material name/material/name, CO2e (kg)/CO2e, Recycled Content, EoL, Lifetime, Circularity.")
         st.stop()
 
     # Lifetime + Materials UI
@@ -459,7 +508,7 @@ if page == "Inputs":
     st.subheader("Materials & processes")
     mats = list(st.session_state.materials.keys())
     st.session_state.assessment["selected_materials"] = st.multiselect(
-        "Select materials", options=mats, 
+        "Select materials", options=mats,
         default=st.session_state.assessment.get("selected_materials", [])
     )
 
@@ -486,18 +535,18 @@ if page == "Inputs":
             for _ in range(int(n) - len(steps)):
                 steps.append({"process": "", "amount": 1.0, "co2e_per_unit": 0.0, "unit": ""})
 
+        # draw each step input row
         for i in range(int(n)):
+            proc_options = [''] + list(st.session_state.processes.keys())
+            current_proc = steps[i]['process'] if steps[i]['process'] in st.session_state.processes else ''
+            idx = proc_options.index(current_proc) if current_proc in proc_options else 0
             proc = st.selectbox(
-                f"Process #{i+1}", 
-                options=[''] + list(st.session_state.processes.keys()),
-                index=([''] + list(st.session_state.processes.keys())).index(steps[i]['process'])
-                    if steps[i]['process'] in st.session_state.processes else 0,
-                key=f"proc_{m}_{i}"
+                f"Process #{i+1}", options=proc_options, index=idx, key=f"proc_{m}_{i}"
             )
             if proc:
                 pr = st.session_state.processes.get(proc, {})
                 amt = st.number_input(
-                    f"Amount for '{proc}' ({pr.get('Unit','')})", 
+                    f"Amount for '{proc}' ({pr.get('Unit','')})",
                     min_value=0.0, value=float(steps[i].get('amount', 1.0)), key=f"amt_{m}_{i}"
                 )
                 steps[i] = {"process": proc, "amount": amt, "co2e_per_unit": pr.get('CO₂e', 0.0), "unit": pr.get('Unit', '')}
@@ -505,6 +554,7 @@ if page == "Inputs":
 # -----------------------------
 # Compute results (shared)
 # -----------------------------
+
 def compute_results():
     data = st.session_state.assessment
     mats = st.session_state.materials
@@ -555,7 +605,7 @@ def compute_results():
     }
 
 # -----------------------------
-# Workspace (tabs)
+# WORKSPACE
 # -----------------------------
 if page == "Workspace":
     if not st.session_state.assessment.get('selected_materials'):
@@ -563,17 +613,17 @@ if page == "Workspace":
         st.stop()
 
     R = compute_results()
-    tabs = st.tabs(["Results", "Comparison", "Final Summary", "Report", "Versions"])
+    tabs = st.tabs(["Results & Comparison", "Final Summary", "Report", "Versions"])
 
-    # Results
+    # Results & Comparison together
     with tabs[0]:
+        # KPI row
         c1, c2, c3 = st.columns(3)
         c1.metric("Total CO₂ (materials)", f"{R['total_material_co2']:.1f} kg")
         c2.metric("Total CO₂ (processes)", f"{R['total_process_co2']:.1f} kg")
         c3.metric("Weighted recycled", f"{R['weighted_recycled']:.1f}%")
 
-    # Comparison (purple charts)
-    with tabs[1]:
+        # Charts
         df = pd.DataFrame(R['comparison'])
         if df.empty:
             st.info("No data yet.")
@@ -614,7 +664,7 @@ if page == "Workspace":
                 st.plotly_chart(style(fig), use_container_width=True)
 
     # Final Summary
-    with tabs[2]:
+    with tabs[1]:
         m1, m2, m3 = st.columns(3)
         m1.markdown(f"<div class='metric'><div>Total Impact CO₂e</div><h2>{R['overall_co2']:.1f} kg</h2></div>", unsafe_allow_html=True)
         m2.markdown(f"<div class='metric'><div>Tree Equivalent / year</div><h2>{R['trees_equiv']:.1f}</h2></div>", unsafe_allow_html=True)
@@ -624,7 +674,7 @@ if page == "Workspace":
             st.write(f"• **{k}** — {v}")
 
     # Report (HTML only)
-    with tabs[3]:
+    with tabs[2]:
         project = st.text_input("Project name", value="Sample Project")
         notes = st.text_area("Executive notes")
         big_logo = logo_tag(100)
@@ -659,10 +709,10 @@ if page == "Workspace":
         st.caption("If you prefer PDF only later, we can add server-side HTML→PDF.")
 
     # Versions
-    with tabs[4]:
+    with tabs[3]:
         class VM:
             def __init__(self, storage_dir: str = "lca_versions"):
-                self.dir = Path(storage_dir); self.dir.mkdir(exist_ok=True)
+                self.dir = Path(storage_dir); ensure_dir(self.dir)
                 self.meta = self.dir / "lca_versions_metadata.json"
             def _load(self): 
                 return json.loads(self.meta.read_text()) if self.meta.exists() else {}
@@ -748,3 +798,57 @@ if page == "Workspace":
                     ok, msg = vm.delete(sel)
                     st.success(msg) if ok else st.error(msg)
 
+# -----------------------------
+# USER GUIDE (shows uploaded docs if present)
+# -----------------------------
+if page == "User Guide":
+    st.subheader("User Guide")
+    st.caption("This page shows the internal LCA-Light docs if present in assets/guides or the app bundle.")
+
+    # Helper: show a document if available
+    def show_doc(label: str, candidates: list[Path]):
+        for p in candidates:
+            if p.exists():
+                st.markdown(f"### {label}")
+                # Try DOCX text extract
+                if p.suffix.lower() == ".docx":
+                    try:
+                        from docx import Document  # type: ignore
+                        doc = Document(str(p))
+                        text = "\n\n".join([para.text for para in doc.paragraphs])
+                        st.text_area(p.name, value=text, height=400)
+                        st.download_button("Download", data=p.read_bytes(), file_name=p.name)
+                    except Exception:
+                        st.download_button(f"Download {p.name}", data=p.read_bytes(), file_name=p.name)
+                        st.info("Install python-docx to preview inline.")
+                elif p.suffix.lower() == ".pdf":
+                    st.download_button(f"Download {p.name}", data=p.read_bytes(), file_name=p.name)
+                    st.info("Open the PDF after download to view the full design guide.")
+                else:
+                    # fallback plain view
+                    try:
+                        st.text(p.read_text(errors='ignore'))
+                    except Exception:
+                        st.write("File available to download.")
+                        st.download_button("Download", data=p.read_bytes(), file_name=p.name)
+                return True
+        return False
+
+    found_any = False
+    # Common filenames (put copies in assets/guides to make them persistent)
+    common = [
+        ("LCA-Light Usage Overview", [GUIDES/"LCA-Light Usage Overview.docx", GUIDES/"LCA-Light Usage Overview (1).docx", Path("/mnt/data/LCA-Light Usage Overview (1).docx")]),
+        ("Text Report of the Easy LCA Tool", [GUIDES/"Text_Report of the Easy LCA Tool.docx", GUIDES/"Text_Report of the Easy LCA Tool (1).docx", Path("/mnt/data/Text_Report of the Easy LCA Tool (1).docx")]),
+        ("LCA Tool Redesign V2", [GUIDES/"LCA Tool Redesign V2.pdf", GUIDES/"LCA Tool Redesign V2 (1).pdf", Path("/mnt/data/LCA Tool Redesign V2 (1).pdf")]),
+        ("LCA Tool (slides)", [GUIDES/"LCA Tool.pdf", Path("/mnt/data/LCA Tool.pdf")]),
+    ]
+    for label, cands in common:
+        if show_doc(label, cands):
+            found_any = True
+
+    if not found_any:
+        st.info("No guide files found. Drop your PDF/DOCX into the 'assets/guides' folder on the server, then refresh.")
+
+# -----------------------------
+# END
+# -----------------------------
