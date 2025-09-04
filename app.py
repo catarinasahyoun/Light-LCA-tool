@@ -499,8 +499,7 @@ if page == "Inputs":
         st.warning("No materials parsed. Check your columns: Material name/material/name + CO2e + (optional) Recycled/EoL/Lifetime/Circularity.")
         st.stop()
     if parsed_p == 0:
-        st.warning("No processes parsed. Ensure the 'Processes' sheet has columns like **Process Type** + **CO2e** + **Unit** (exact headers), or use aliases such as Process/Step/Operation for the name column.)
-
+        st.warning("No processes parsed. Ensure the 'Processes' sheet has columns like Process Type + CO2e + Unit (exact headers), or use aliases such as Process/Step/Operation for the name column.")
     # Lifetime + Materials UI
     st.subheader("Lifetime (weeks)")
     st.session_state.assessment["lifetime_weeks"] = st.number_input(
