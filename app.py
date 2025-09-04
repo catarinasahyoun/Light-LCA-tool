@@ -1,113 +1,226 @@
-# Easy LCA Indicator — Sign‑in first, preserved vibe, logo, DB persistence, User Guide
-# ----------------------------------------------------------------------------------
-# What you get (no surprises):
-# • First screen = Sign‑in gate (email + optional name). Nothing else renders before that.
-# • Your Tchai logo shown at top (tries ./tchai_logo.png first, falls back to /mnt/data/tchai_logo.png).
-# • Database tab: ONE Excel workbook with two sheets: "Processes" and "Materials".
-#   - Per‑user persistence: saved to ./data/<hash_of_email>/lca_database.xlsx.
-#   - No auto‑preview unless you toggle it on.
-# • Calculator tab: choose a process, quantity, unit; auto‑detects impact columns (e.g., GWP/CO2e) and computes totals.
-# • User Guide tab: auto‑lists any DOCX/PDF in ./guides and renders inline (needs `mammoth` or `python-docx` for DOCX).
-# • Reports tab: export your current DB to XLSX.
-# • Settings: sign out + clear in‑memory cache.
-#
-# Paste this file as app.py, create folders `data/` and `guides/` (auto‑created if missing), and run:
-#   streamlit run app.py
-# ----------------------------------------------------------------------------------
+# app.py — TCHAI Easy LCA Indicator
+# Sign-in (email + password) first • Tchai logo visible on sign-in • Guides tab (DOCX/PDF)
+# Keeps single Excel DB (Processes + Materials) + per-user persistence
 
-import io
-import re
-import base64
-import hashlib
+import io, os, re, json, base64, secrets, hashlib
+from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Tuple, List
+from typing import Optional, Dict, Any, Tuple, List
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
-# =========================
-# Page & simple styling
-# =========================
-st.set_page_config(page_title="Easy LCA Indicator", page_icon="🌿", layout="wide")
-
-PRIMARY = "#2E7D32"  # deep green accent
-
-st.markdown(
-    f"""
-    <style>
-      :root {{ --brand: {PRIMARY}; }}
-      .block-container {{ padding-top: 1.0rem; padding-bottom: 2.2rem; }}
-      .title-row {{ display:flex; align-items:center; gap:.75rem; margin-bottom:.5rem; }}
-      .title-row img {{ width:40px; height:40px; border-radius:8px; border:1px solid #cfe8cf; }}
-      .title-text {{ font-size: 1.8rem; font-weight: 800; color: {PRIMARY}; }}
-      .sub {{ color:#4d7c4d; margin-top:-2px; }}
-      .card {{ border:1px solid rgba(15,23,42,.06); border-radius:14px; padding:14px 16px; background:#fff; }}
-      .stButton>button {{ background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%)!important; color:#fff!important; border:0!important; border-radius:10px!important; padding:8px 14px!important; font-weight:700!important; }}
-    </style>
-    """,
-    unsafe_allow_html=True,
+# -----------------------------
+# Page configuration
+# -----------------------------
+st.set_page_config(
+    page_title="TCHAI — Easy LCA Indicator",
+    page_icon="🌿",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    menu_items={
+        "Get Help": "https://docs.streamlit.io/",
+        "Report a bug": "mailto:edwinsahyoun24@gmail.com",
+        "About": "Light LCA Tool — refreshed UI (Sep 2025)"
+    }
 )
 
-# =========================
-# Paths and constants
-# =========================
-APP_DIR = Path.cwd()
-DATA_DIR = APP_DIR / "data"
-GUIDE_DIR = APP_DIR / "guides"
-DATA_DIR.mkdir(exist_ok=True)
-GUIDE_DIR.mkdir(exist_ok=True)
+PRIMARY = "#00A67E"
+PURPLE = ['#5B21B6','#6D28D9','#7C3AED','#8B5CF6','#A78BFA','#C4B5FD']
+
+# -----------------------------
+# Folders & small helpers
+# -----------------------------
+ASSETS = Path("assets"); ASSETS.mkdir(exist_ok=True)
+DB_ROOT = ASSETS / "databases"; DB_ROOT.mkdir(parents=True, exist_ok=True)
+USERS_FILE = ASSETS / "users.json"
+
+DATA_DIR = Path("data"); DATA_DIR.mkdir(exist_ok=True)
+GUIDE_DIR = Path("guides"); GUIDE_DIR.mkdir(exist_ok=True)
 
 DEFAULT_DB_NAME = "lca_database.xlsx"
 PROCESSES_SHEET = "Processes"
 MATERIALS_SHEET = "Materials"
 
-LOGO_PATHS = [Path("tchai_logo.png"), Path("/mnt/data/tchai_logo.png")]  # tries local first, then sandbox path
+def read_json(path: Path, default):
+    try: return json.loads(path.read_text())
+    except Exception: return default
 
-# =========================
-# Auth helpers (sign‑in gate)
-# =========================
+def write_json(path: Path, data):
+    path.write_text(json.dumps(data, indent=2))
 
+def _rerun():
+    try:
+        st.rerun()
+    except Exception:
+        st.experimental_rerun()
+
+# -----------------------------
+# Branding (logo)
+# -----------------------------
+def _load_logo_bytes() -> Optional[bytes]:
+    for p in [ASSETS / "tchai_logo.png", Path("tchai_logo.png"), Path("/mnt/data/tchai_logo.png")]:
+        if p.exists(): return p.read_bytes()
+    return None
+
+def logo_tag(height=86):
+    b = _load_logo_bytes()
+    if not b:
+        return "<span style='font-weight:900;font-size:28px'>TCHAI</span>"
+    b64 = base64.b64encode(b).decode()
+    return f"<img src='data:image/png;base64,{b64}' alt='TCHAI' style='height:{height}px'/>"
+
+st.markdown(f"""
+<style>
+:root {{ --brand: {PRIMARY}; }}
+.block-container {{ padding-top: 1.0rem; padding-bottom: 2.2rem; }}
+.card {{ border:1px solid rgba(15,23,42,.08); border-radius:14px; padding:14px 16px; background:#fff; }}
+.stButton>button {{ background: var(--brand)!important; color:#fff!important; border:0!important; border-radius:10px!important; padding:8px 14px!important; font-weight:700!important; }}
+.center {{ display:flex; align-items:center; justify-content:center; min-height: 68vh; }}
+.panel {{ max-width: 560px; width:100%; background:#fff; border:1px solid rgba(15,23,42,.08); border-radius:16px; padding:22px; box-shadow: 0 10px 28px rgba(0,0,0,.08); }}
+.brand-title {{ font-weight:900; font-size:26px; text-align:center; }}
+.small-muted {{ font-size:.85rem; color:#64748b; }}
+</style>
+""", unsafe_allow_html=True)
+
+# -----------------------------
+# Users & auth (password-based)
+# -----------------------------
+def _hash(pw: str, salt: str) -> str:
+    return hashlib.sha256((salt + pw).encode()).hexdigest()
+
+def _load_users() -> dict:
+    return read_json(USERS_FILE, {})
+
+def _save_users(users: dict):
+    write_json(USERS_FILE, users)
+
+def bootstrap_users_if_needed():
+    users = _load_users()
+    if users: return
+    default_pw = "ChangeMe123!"
+    emails = [
+        "sustainability@tchai.nl",
+        "jillderegt@tchai.nl",
+        "veravanbeaumont@tchai.nl",
+    ]
+    out = {}
+    for email in emails:
+        salt = secrets.token_hex(8)
+        out[email] = {"salt": salt, "hash": _hash(default_pw, salt), "created_at": datetime.now().isoformat()}
+    _save_users(out)
+
+bootstrap_users_if_needed()
+if "auth_user" not in st.session_state:
+    st.session_state.auth_user = None
+
+def _initials(email: str) -> str:
+    parts = [p for p in re.split(r"\s+|_+|\.+|@", email) if p]
+    return ((parts[0][0] if parts else "U") + (parts[1][0] if len(parts) > 1 else "")).upper()
+
+# -----------------------------
+# Per-user DB location
+# -----------------------------
 def _hash_email(email: str) -> str:
     return hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()[:16]
 
-
-def current_user() -> Optional[Dict[str, str]]:
-    return st.session_state.get("user")
-
-
-def require_sign_in():
-    """Shows a minimal sign‑in form and stops the app until user is signed in."""
-    if current_user():
-        return
-    st.markdown("<h2>Sign in</h2>", unsafe_allow_html=True)
-    with st.form("signin_form", clear_on_submit=False):
-        email = st.text_input("Email", placeholder="name@example.com")
-        name = st.text_input("Name (optional)")
-        submitted = st.form_submit_button("Continue →")
-        if submitted:
-            if email and re.match(r"^.+@.+\\..+$", email):
-                st.session_state["user"] = {"email": email.strip(), "name": name.strip()}
-                st.experimental_rerun()
-            else:
-                st.error("Please enter a valid email address.")
-    st.stop()
-
-
-def user_dir() -> Path:
-    u = current_user()
-    assert u and u.get("email"), "user must be signed in"
-    d = DATA_DIR / _hash_email(u["email"]) 
+def current_user_folder(email: str) -> Path:
+    d = DATA_DIR / _hash_email(email)
     d.mkdir(parents=True, exist_ok=True)
     return d
 
+def get_user_db_path(email: str) -> Optional[Path]:
+    p = current_user_folder(email) / DEFAULT_DB_NAME
+    return p if p.exists() else None
 
-def user_db_path() -> Path:
-    return user_dir() / DEFAULT_DB_NAME
+def save_uploaded_file(uploaded, out_path: Path) -> Path:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "wb") as f:
+        f.write(uploaded.getbuffer())
+    return out_path
 
-# =========================
-# Data helpers
-# =========================
+# -----------------------------
+# Sign-in gate (logo visible)
+# -----------------------------
+def sign_in_gate():
+    if st.session_state.auth_user:
+        return
+    # full-screen centered with logo
+    st.markdown("<div class='center'><div class='panel'>", unsafe_allow_html=True)
+    st.markdown(f"<div style='display:flex;justify-content:center;margin-bottom:10px'>{logo_tag(72)}</div>", unsafe_allow_html=True)
+    st.markdown("<div class='brand-title'>Easy LCA Indicator</div>", unsafe_allow_html=True)
+    st.markdown("<p class='small-muted' style='text-align:center'>Sign in with your TCHAI account</p>", unsafe_allow_html=True)
 
+    with st.form("signin_form", clear_on_submit=False):
+        email = st.text_input("Email", placeholder="you@tchai.nl")
+        pw = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Sign in")
+    if submitted:
+        users = _load_users()
+        rec = users.get(email)
+        if not rec:
+            st.error("Unknown user.")
+        elif _hash(pw, rec["salt"]) != rec["hash"]:
+            st.error("Wrong password.")
+        else:
+            st.session_state.auth_user = email
+            st.success("Welcome!")
+            st.markdown("</div></div>", unsafe_allow_html=True)
+            _rerun()
+            st.stop()
+
+    st.markdown("</div></div>", unsafe_allow_html=True)
+    st.stop()
+
+sign_in_gate()  # <- blocks until signed in
+email = st.session_state.auth_user
+
+# -----------------------------
+# Header with logo + user
+# -----------------------------
+cl, cm, cr = st.columns([0.18, 0.64, 0.18])
+with cl: st.markdown(f"{logo_tag(86)}", unsafe_allow_html=True)
+with cm: st.markdown("<div class='brand-title'>Easy LCA Indicator</div>", unsafe_allow_html=True)
+with cr:
+    initials = _initials(email)
+    if hasattr(st, "popover"):
+        with st.popover(f"👤 {initials}"):
+            st.write(f"Signed in as **{email}**")
+            st.markdown("---")
+            st.subheader("Change password")
+            with st.form("change_pw_form", clear_on_submit=True):
+                cur = st.text_input("Current password", type="password")
+                new = st.text_input("New password", type="password")
+                conf = st.text_input("Confirm new password", type="password")
+                submitted = st.form_submit_button("Update password")
+            if submitted:
+                users = _load_users()
+                rec = users.get(email)
+                if not rec or _hash(cur, rec["salt"]) != rec["hash"]:
+                    st.error("Current password is incorrect.")
+                elif not new or new != conf:
+                    st.error("New passwords don't match.")
+                else:
+                    salt = secrets.token_hex(8)
+                    rec["salt"] = salt
+                    rec["hash"] = _hash(new, salt)
+                    users[email] = rec
+                    _save_users(users)
+                    st.success("Password changed.")
+            st.markdown("---")
+            if st.button("Sign out"):
+                st.session_state.auth_user = None
+                _rerun()
+
+# -----------------------------
+# Tabs
+# -----------------------------
+Tabs = st.tabs(["Dashboard", "LCA Calculator", "Database", "Reports", "User Guide", "Settings"])
+
+# -----------------------------
+# Excel IO
+# -----------------------------
 def read_excel_db(path: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
     xl = pd.ExcelFile(path)
     if PROCESSES_SHEET not in xl.sheet_names:
@@ -120,128 +233,65 @@ def read_excel_db(path: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
     df_mat.columns = [str(c).strip() for c in df_mat.columns]
     return df_proc, df_mat
 
+# cache in session
+if "df_processes" not in st.session_state: st.session_state.df_processes = None
+if "df_materials" not in st.session_state: st.session_state.df_materials = None
 
-def save_uploaded_file(uploaded, out_path: Path) -> Path:
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "wb") as f:
-        f.write(uploaded.getbuffer())
-    return out_path
+# -----------------------------
+# Dashboard
+# -----------------------------
+with Tabs[0]:
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("**Databases uploaded**")
+        st.markdown(f"<h2>{len(list(DATA_DIR.rglob(DEFAULT_DB_NAME)))}</h2>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    with c2:
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("**Signed-in user**")
+        st.markdown(f"<h2>{email}</h2>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    with c3:
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("**Guide detected**")
+        has_any_guide = any(p.exists() for p in GUIDE_DIR.glob("*"))
+        st.markdown(f"<h2>{'Yes' if has_any_guide else 'No'}</h2>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-# DOCX & PDF renderers (User Guide)
+# -----------------------------
+# LCA Calculator
+# -----------------------------
+with Tabs[1]:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("### Calculator")
+    df_proc = st.session_state.df_processes
+    df_mat = st.session_state.df_materials
 
-def docx_to_html(doc_path: Path) -> Optional[str]:
-    """Return HTML for a DOCX using mammoth/python-docx if available; else None."""
-    try:
-        import mammoth  # type: ignore
-        with open(doc_path, "rb") as f:
-            result = mammoth.convert_to_html(f)
-            return result.value
-    except Exception:
+    # try load per-user DB if not in memory
+    if (df_proc is None or df_mat is None) and get_user_db_path(email):
         try:
-            import docx  # type: ignore
-            d = docx.Document(str(doc_path))
-            return "<br/>".join(p.text for p in d.paragraphs)
-        except Exception:
-            return None
-
-
-def embed_pdf(file_path: Path, height: int = 900):
-    b64 = base64.b64encode(file_path.read_bytes()).decode("utf-8")
-    st.markdown(
-        f"""
-        <iframe src="data:application/pdf;base64,{b64}" width="100%" height="{height}" type="application/pdf"></iframe>
-        """,
-        unsafe_allow_html=True,
-    )
-
-# =========================
-# Gate: Sign‑in FIRST
-# =========================
-require_sign_in()
-user = current_user()
-
-# =========================
-# Header + Logo
-# =========================
-logo_src = next((p for p in LOGO_PATHS if p.exists()), None)
-col_logo, col_title = st.columns([1, 6])
-with col_logo:
-    if logo_src:
-        st.image(str(logo_src), use_column_width=False, width=56)
-with col_title:
-    st.markdown("<div class='title-text'>Easy LCA Indicator</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='sub'>Welcome {user.get('name') or user.get('email')}</div>", unsafe_allow_html=True)
-
-# =========================
-# Tabs
-# =========================
-TabCalc, TabDB, TabGuide, TabRep, TabSet = st.tabs([
-    "Calculator", "Database", "User Guide", "Reports", "Settings"
-])
-
-# =========================
-# Database tab (upload, persist per‑user)
-# =========================
-with TabDB:
-    st.markdown("### Database")
-    st.caption("Upload ONE Excel with sheets named 'Processes' and 'Materials'. Saved to your account.")
-
-    uploaded = st.file_uploader("Upload/replace my database (.xlsx)", type=["xlsx"], accept_multiple_files=False)
-    preview = st.toggle("Preview tables after upload", value=False)
-
-    if uploaded is not None:
-        saved = save_uploaded_file(uploaded, user_db_path())
-        try:
-            dfp, dfm = read_excel_db(saved)
-            st.session_state["df_processes"], st.session_state["df_materials"] = dfp, dfm
-            st.success("Database saved to your account.")
+            df_proc, df_mat = read_excel_db(get_user_db_path(email))
+            st.session_state.df_processes, st.session_state.df_materials = df_proc, df_mat
         except Exception as e:
-            st.error(f"Failed to read Excel: {e}")
-
-    # Lazy load from disk if session empty
-    if st.session_state.get("df_processes") is None:
-        p = user_db_path()
-        if p.exists():
-            try:
-                dfp, dfm = read_excel_db(p)
-                st.session_state["df_processes"], st.session_state["df_materials"] = dfp, dfm
-            except Exception as e:
-                st.warning(f"Saved database couldn't be read: {e}")
-
-    if preview and st.session_state.get("df_processes") is not None:
-        st.subheader("Processes (preview)")
-        st.dataframe(st.session_state["df_processes"].head(30), use_container_width=True)
-    if preview and st.session_state.get("df_materials") is not None:
-        st.subheader("Materials (preview)")
-        st.dataframe(st.session_state["df_materials"].head(30), use_container_width=True)
-
-# =========================
-# Calculator tab (clean & focused)
-# =========================
-with TabCalc:
-    st.markdown("### LCA Calculator")
-
-    df_proc = st.session_state.get("df_processes")
-    df_mat = st.session_state.get("df_materials")
+            st.warning(f"Could not load your saved DB: {e}")
 
     if df_proc is None or df_mat is None:
-        st.info("No database loaded yet. Go to **Database** and upload your Excel.")
+        st.info("No database loaded yet. Upload an Excel workbook first in the **Database** tab.")
     else:
-        # Process name column detection
-        name_col = next((c for c in ["Process", "Name", "Process Name", "process", "name"] if c in df_proc.columns), df_proc.columns[0])
+        # choose process
+        name_col = next((c for c in ["Process","Name","Process Name","process","name"] if c in df_proc.columns), df_proc.columns[0])
         processes = df_proc[name_col].astype(str).tolist()
-
         c1, c2 = st.columns([2,1])
         with c1:
-            selected_proc = st.selectbox("Process", processes)
+            selected_proc = st.selectbox("Select a process", processes)
         with c2:
             qty = st.number_input("Quantity", min_value=0.0, value=1.0)
-        fu = st.text_input("Functional unit", value="unit")
+        fu = st.text_input("Functional unit (e.g., kg, unit)", value="unit")
 
-        # Impact columns detection
         impact_cols = [c for c in df_proc.columns if re.search(r"(CO2|CO₂|GHG|GWP|impact|emission)", str(c), re.I)]
         if not impact_cols:
-            st.warning("No impact column detected. Add a column such as 'GWP (kg CO2e/unit)'.")
+            st.warning("No emission/impact columns detected in Processes sheet. Add a column like 'GWP (kg CO2e/unit)'.")
         else:
             impact_col = st.selectbox("Impact column", impact_cols)
             row = df_proc[df_proc[name_col].astype(str) == str(selected_proc)]
@@ -253,18 +303,111 @@ with TabCalc:
                 except Exception:
                     factor = 0.0
                 total = qty * factor
-                st.metric(label=f"Impact factor ({impact_col})", value=f"{factor:,.4f}")
-                st.metric(label=f"Total impact for {qty:g} {fu}", value=f"{total:,.4f}")
-                st.caption("Tip: Add more impact columns (energy, water, etc.) and select them here.")
+                c1, c2 = st.columns(2)
+                with c1: st.metric(label=f"Impact factor ({impact_col})", value=f"{factor:,.4f}")
+                with c2: st.metric(label=f"Total impact for {qty:g} {fu}", value=f"{total:,.4f}")
+                st.caption("Tip: Add more impact columns (e.g., water, energy) and pick them here.")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-# =========================
-# User Guide tab (auto‑detect DOCX & PDF)
-# =========================
-with TabGuide:
+# -----------------------------
+# Database (upload + persist per user)
+# -----------------------------
+with Tabs[2]:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("### Database (single Excel with `Processes` & `Materials` sheets)")
+    uploaded = st.file_uploader("Upload/replace your Excel (.xlsx)", type=["xlsx"], accept_multiple_files=False)
+    preview = st.toggle("Preview tables after upload", value=False)
+
+    if uploaded is not None:
+        out_path = current_user_folder(email) / DEFAULT_DB_NAME
+        saved_path = save_uploaded_file(uploaded, out_path)
+        st.success(f"Saved database for **{email}**.")
+        try:
+            df_proc, df_mat = read_excel_db(saved_path)
+            st.session_state.df_processes, st.session_state.df_materials = df_proc, df_mat
+        except Exception as e:
+            st.error(f"Failed to read Excel: {e}")
+
+    if preview and st.session_state.df_processes is not None:
+        st.subheader("Processes (preview)")
+        st.dataframe(st.session_state.df_processes.head(30), use_container_width=True)
+    if preview and st.session_state.df_materials is not None:
+        st.subheader("Materials (preview)")
+        st.dataframe(st.session_state.df_materials.head(30), use_container_width=True)
+
+    if st.button("Load my saved database"):
+        p = get_user_db_path(email)
+        if p:
+            try:
+                df_proc, df_mat = read_excel_db(p)
+                st.session_state.df_processes, st.session_state.df_materials = df_proc, df_mat
+                st.success("Database loaded from disk.")
+            except Exception as e:
+                st.error(f"Failed to read saved Excel: {e}")
+        else:
+            st.info("No saved database found yet.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# -----------------------------
+# Reports (export current DB)
+# -----------------------------
+with Tabs[3]:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("### Reports")
+    if st.session_state.df_processes is None:
+        st.info("Load a database to enable export.")
+    else:
+        with io.BytesIO() as output:
+            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                st.session_state.df_processes.to_excel(writer, sheet_name="Processes", index=False)
+                if st.session_state.df_materials is not None:
+                    st.session_state.df_materials.to_excel(writer, sheet_name="Materials", index=False)
+            data = output.getvalue()
+        st.download_button("Download current DB (xlsx)", data=data, file_name="lca_current_db.xlsx")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# -----------------------------
+# User Guide (DOCX/PDF)
+# -----------------------------
+def try_import_mammoth():
+    try:
+        import mammoth  # type: ignore
+        return mammoth
+    except Exception:
+        return None
+
+def try_import_docx():
+    try:
+        import docx  # type: ignore
+        return docx
+    except Exception:
+        return None
+
+def docx_to_html(doc_path: Path) -> Optional[str]:
+    mammoth = try_import_mammoth()
+    if mammoth:
+        with open(doc_path, "rb") as f:
+            result = mammoth.convert_to_html(f)
+            return result.value
+    docx = try_import_docx()
+    if docx:
+        d = docx.Document(str(doc_path))
+        return "<br/>".join(p.text for p in d.paragraphs)
+    return None
+
+def embed_pdf(file_path: Path, height: int = 900):
+    b64 = base64.b64encode(file_path.read_bytes()).decode("utf-8")
+    st.markdown(
+        f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="{height}" type="application/pdf"></iframe>',
+        unsafe_allow_html=True
+    )
+
+with Tabs[4]:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.markdown("### User Guide")
-    st.caption("Drop DOCX/PDF files into ./guides or upload below. They will appear automatically.")
+    st.caption("Drop DOCX/PDF files into the `guides/` folder (or upload below).")
 
-    up = st.file_uploader("Add a guide (DOCX or PDF)", type=["docx", "pdf"], key="guide_upl")
+    up = st.file_uploader("Add/replace a guide (DOCX or PDF)", type=["docx","pdf"], key="guide_upl")
     if up is not None:
         dest = GUIDE_DIR / up.name
         save_uploaded_file(up, dest)
@@ -272,61 +415,44 @@ with TabGuide:
 
     files = sorted(list(GUIDE_DIR.glob("*.docx")) + list(GUIDE_DIR.glob("*.pdf")), key=lambda p: p.name.lower())
     if not files:
-        st.info("No guides found yet in ./guides")
+        st.info("No guides found yet in `guides/`.")
     else:
-        choice = st.selectbox("Choose a file", [p.name for p in files])
+        choice = st.selectbox("Choose a document to view", [p.name for p in files])
         chosen = next(p for p in files if p.name == choice)
         if chosen.suffix.lower() == ".docx":
             html = docx_to_html(chosen)
-            if html:
-                st.markdown(html, unsafe_allow_html=True)
+            if html: st.markdown(html, unsafe_allow_html=True)
             else:
-                st.warning("Couldn't render DOCX inline (install 'mammoth' or 'python-docx').")
+                st.warning("Install `mammoth` or `python-docx` for inline DOCX.")
                 st.download_button("Download DOCX", data=chosen.read_bytes(), file_name=chosen.name)
         else:
             try:
                 embed_pdf(chosen, height=900)
             except Exception:
                 st.download_button("Download PDF", data=chosen.read_bytes(), file_name=chosen.name)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-# =========================
-# Reports tab (export DB)
-# =========================
-with TabRep:
-    st.markdown("### Reports")
-    if st.session_state.get("df_processes") is None:
-        st.info("Load a database to enable export.")
+# -----------------------------
+# Settings
+# -----------------------------
+with Tabs[5]:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("### Settings & Maintenance")
+
+    if st.button("Clear in-memory data (current session)"):
+        for k in ["df_processes", "df_materials"]:
+            if k in st.session_state: del st.session_state[k]
+        st.success("Cleared session data.")
+
+    user_dir = current_user_folder(email)
+    if (user_dir / DEFAULT_DB_NAME).exists():
+        if st.button("Delete my saved database"):
+            try:
+                (user_dir / DEFAULT_DB_NAME).unlink(missing_ok=True)
+                st.success("Deleted your saved database.")
+            except Exception as e:
+                st.error(f"Couldn't delete: {e}")
     else:
-        with io.BytesIO() as output:
-            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-                st.session_state["df_processes"].to_excel(writer, sheet_name="Processes", index=False)
-                if st.session_state.get("df_materials") is not None:
-                    st.session_state["df_materials"].to_excel(writer, sheet_name="Materials", index=False)
-            data = output.getvalue()
-        st.download_button("Download current DB (xlsx)", data=data, file_name="lca_current_db.xlsx")
+        st.caption("No saved database yet.")
 
-# =========================
-# Settings tab
-# =========================
-with TabSet:
-    st.markdown("### Settings")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Sign out"):
-            if "user" in st.session_state:
-                del st.session_state["user"]
-            for k in ["df_processes", "df_materials"]:
-                if k in st.session_state:
-                    del st.session_state[k]
-            st.success("Signed out.")
-            st.experimental_rerun()
-    with col2:
-        if st.button("Clear in‑memory data"):
-            for k in ["df_processes", "df_materials"]:
-                if k in st.session_state:
-                    del st.session_state[k]
-            st.success("Cleared session data.")
-
-# ---------------------------
-# End of file
-# ---------------------------
+    st.markdown("</div>", unsafe_allow_html=True)
