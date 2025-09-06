@@ -915,148 +915,95 @@ if page == "Workspace":
                     st.success(msg) if ok else st.error(msg)
 
 # -----------------------------
-# USER GUIDE (render + downloads) — FIRST after sign-in
+# USER GUIDE (inline DOCX only)
 # -----------------------------
-def _find_first_existing(paths: List[Path]) -> Optional[Path]:
+from pathlib import Path
+
+# Point to the single, authoritative guide file you provided
+GUIDE_CANDIDATES = [
+    Path("/mnt/data/LCA-Light Usage Overview - Updated.docx"),
+    GUIDES / "LCA-Light Usage Overview - Updated.docx",  # optional fallback if you later move it to assets/guides
+]
+
+def _first_existing(paths):
     for p in paths:
         if p.exists():
             return p
     return None
 
-def _docx_to_markdown(doc_path: Path) -> str:
-    """Lightweight DOCX → Markdown-ish converter for headings, bullets, paragraphs, and simple tables."""
-    if not DOCX_OK:
-        return ""
-    from docx import Document  # local import to avoid errors when library missing
-    doc = Document(str(doc_path))
-
-    lines: List[str] = []
-
-    # Paragraphs: headings, bullets, numbers, body
-    for para in doc.paragraphs:
-        text = para.text.strip()
-        if not text:
-            lines.append("")
-            continue
-
-        style = (para.style.name or "").lower()
-
-        # Headings
-        if "heading 1" in style:
-            lines.append(f"# {text}")
-            continue
-        if "heading 2" in style:
-            lines.append(f"## {text}")
-            continue
-        if "heading 3" in style:
-            lines.append(f"### {text}")
-            continue
-
-        # Bullets / numbered
-        if "list bullet" in style or "bullet" in style:
-            lines.append(f"- {text}")
-            continue
-        if "list number" in style or "number" in style:
-            lines.append(f"1. {text}")
-            continue
-
-        # Body
-        lines.append(text)
-
-    # Very simple table rendering
-    for tbl in doc.tables:
-        if tbl.rows:
-            header_cells = [c.text.strip() for c in tbl.rows[0].cells]
-            if any(h for h in header_cells):
-                lines.append("")
-                lines.append("| " + " | ".join(header_cells) + " |")
-                lines.append("| " + " | ".join(["---"] * len(header_cells)) + " |")
-                for r in tbl.rows[1:]:
-                    cells = [c.text.strip() for c in r.cells]
-                    lines.append("| " + " | ".join(cells) + " |")
-                lines.append("")
-
-    return "\n".join(lines).strip()
-    
-# ---------- User Guide (PDF) helper ----------
-def render_pdf_inline(pdf_path: Path, title: str = "📘 LCA-Light Usage Overview (PDF)"):
+def _read_docx_text(docx_path: Path) -> str | None:
     """
-    Renders a local PDF inline using an iframe (no python-docx needed).
+    Return plain text extracted from DOCX.
+    Tries python-docx first; falls back to docx2txt; returns None if unavailable.
     """
+    # Try python-docx (best structure)
     try:
-        pdf_bytes = Path(pdf_path).read_bytes()
-    except Exception as e:
-        st.warning(f"Could not read PDF at {pdf_path}: {e}")
-        return
+        import docx  # python-docx
+        d = docx.Document(str(docx_path))
+        parts = []
+        for p in d.paragraphs:
+            t = (p.text or "").strip()
+            if t:
+                parts.append(t)
+        # Simple table support (append after paragraphs)
+        for tbl in d.tables:
+            if tbl.rows:
+                header = [c.text.strip() for c in tbl.rows[0].cells]
+                if any(header):
+                    parts.append("")  # spacing
+                    parts.append(" | ".join(header))
+                    parts.append(" | ".join(["---"] * len(header)))
+                    for r in tbl.rows[1:]:
+                        parts.append(" | ".join(c.text.strip() for c in r.cells))
+                    parts.append("")
+        return "\n\n".join(parts).strip()
+    except Exception:
+        pass
 
-    b64 = base64.b64encode(pdf_bytes).decode("utf-8")
-    st.markdown(f"### {title}")
-    html = f"""
-    <iframe
-        src="data:application/pdf;base64,{b64}"
-        width="100%" height="900"
-        style="border:none;border-radius:8px;"
-    ></iframe>
-    """
-    st.components.v1.html(html, height=920, scrolling=True)
+    # Try docx2txt (lightweight)
+    try:
+        import docx2txt
+        txt = docx2txt.process(str(docx_path))
+        return (txt or "").strip()
+    except Exception:
+        return None
 
 if page == "User Guide":
     st.subheader("User Guide")
-    st.caption(
-        "Files in <code>assets/guides/</code> persist. This page renders the overview and lets you download the rest.",
-        help="DOCX is rendered inline below if available; PDFs are offered as downloads.",
-    )
+    st.caption("This page renders the official LCA-Light Usage Overview inline and provides a download button.")
 
-    # Candidates
-    lca_light_candidates = [
-        GUIDES / "LCA-Light Usage Overview.docx",
-        GUIDES / "LCA-Light Usage Overview (1).docx",
-        Path("/mnt/data/LCA-Light Usage Overview (1).docx"),
-    ]
-    text_report_candidates = [
-        GUIDES / "Text_Report of the Easy LCA Tool.docx",
-        GUIDES / "Text_Report of the Easy LCA Tool (1).docx",
-        Path("/mnt/data/Text_Report of the Easy LCA Tool (1).docx"),
-    ]
-    redesign_pdf_candidates = [
-        GUIDES / "LCA Tool Redesign V2.pdf",
-        GUIDES / "LCA Tool Redesign V2 (1).pdf",
-        Path("/mnt/data/LCA Tool Redesign V2 (1).pdf"),
-    ]
-    slides_pdf_candidates = [
-        GUIDES / "LCA Tool.pdf",
-        Path("/mnt/data/LCA Tool.pdf"),
-    ]
+    guide_path = _first_existing(GUIDE_CANDIDATES)
+    if not guide_path:
+        st.error("Guide not found at: `/mnt/data/LCA-Light Usage Overview - Updated.docx`")
+        st.stop()
 
-       # 1) Render the LCA-Light Usage Overview inline (DOCX if possible, else PDF)
-    st.markdown("### 📘 LCA-Light Usage Overview (inline)")
-    docx_path = _find_first_existing(lca_light_candidates)
-    rendered = False
+    text = _read_docx_text(guide_path)
 
-    if docx_path and DOCX_OK:
-        try:
-            md = _docx_to_markdown(docx_path)
-            if md:
-                st.markdown(md)
-                rendered = True
-            else:
-                st.info("DOCX found but produced no content. Falling back to PDF inline.")
-        except Exception as e:
-            st.info(f"DOCX rendering failed ({e}). Falling back to PDF inline.")
+    if text:
+        # Scrollable inline view
+        st.text_area(
+            label="",
+            value=text,
+            height=600,
+            label_visibility="collapsed"
+        )
+    else:
+        st.warning(
+            "I found the guide file but couldn't extract the text. "
+            "Please add **python-docx** or **docx2txt** to the environment."
+        )
 
-    if not rendered:
-        # PDF fallback (works without python-docx)
-        pdf_inline = _find_first_existing(redesign_pdf_candidates) or _find_first_existing(slides_pdf_candidates)
-        if pdf_inline:
-            with st.expander("📘 LCA-Light User Guide (PDF inline)", expanded=True):
-                render_pdf_inline(pdf_inline, title="📘 LCA-Light Usage Overview (PDF)")
-        else:
-            # Nothing to render inline
-            if not DOCX_OK:
-                st.warning("`python-docx` not installed and no PDF found in assets/guides/. Add a PDF (e.g., 'LCA Tool Redesign V2 (1).pdf').")
-            else:
-                st.info("No DOCX/PDF guide found in assets/guides/ or /mnt/data/.")
-
+    # Download button (always shown if file readable)
+    try:
+        with open(guide_path, "rb") as f:
+            st.download_button(
+                "⬇️ Download the User Guide (DOCX)",
+                f,
+                file_name="LCA-Light Usage Overview - Updated.docx",
+                type="secondary",
+                use_container_width=True,
+            )
+    except Exception:
+        st.info("Download unavailable (couldn't open the DOCX file).")
 
     st.stop()
-
