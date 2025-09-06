@@ -818,11 +818,11 @@ if page == "Workspace":
             material_masses=st.session_state.assessment["material_masses"],
         )
 
-        if pdf_bytes:
+                if pdf_bytes:
             st.download_button("⬇️ Download PDF report (smart-filled)", data=pdf_bytes,
                                file_name=f"TCHAI_Report_{project.replace(' ','_')}.pdf", mime="application/pdf")
         else:
-            st.warning("PDF backend not found (ReportLab). Offering DOCX instead.")
+            st.warning("PDF backend not found (ReportLab). Trying DOCX fallback…")
             docx_bytes = build_docx_fallback(
                 project, notes,
                 summary={
@@ -842,7 +842,58 @@ if page == "Workspace":
                                    file_name=f"TCHAI_Report_{project.replace(' ','_')}.docx",
                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
             else:
-                st.error("Neither PDF nor DOCX export is available. Please add 'reportlab' or 'python-docx' to the environment.")
+                # FINAL FALLBACK: Plain-text report (no extra libraries needed)
+                st.warning("Neither PDF (ReportLab) nor DOCX (python-docx) backends are available. Providing a plain-text report.")
+                lines = []
+                lines.append(f"{project} — Easy LCA Report")
+                lines.append("=" * (len(lines[-1])))
+                lines.append("")
+                lines.append("Introduction")
+                lines.append("At Tchai we build different: within every brand space we design we try to leave a positive mark on people and planet.")
+                lines.append("This plain-text report is provided because export libraries are not installed.")
+                lines.append("")
+                lines.append("Key Metrics")
+                lines.append(f"- Lifetime: {R['lifetime_years']:.1f} years ({int(R['lifetime_years']*52)} weeks)")
+                lines.append(f"- Total CO₂e: {R['overall_co2']:.1f} kg")
+                lines.append(f"- Weighted recycled content: {R['weighted_recycled']:.1f}%")
+                lines.append(f"- Trees/year: {R['trees_equiv']:.1f}")
+                lines.append(f"- Total trees: {R['total_trees_equiv']:.1f}")
+                lines.append("")
+                if notes.strip():
+                    lines.append("Executive Notes")
+                    lines.append(notes.strip())
+                    lines.append("")
+                lines.append("Material Comparison Overview")
+                lines.append("Material | CO₂e per Unit (kg) | Avg. Recycled Content | Circularity | End-of-Life | Tree Equivalent*")
+                lines.append("-" * 96)
+                rows = _material_rows_for_report(
+                    st.session_state.assessment["selected_materials"],
+                    st.session_state.materials,
+                    st.session_state.assessment["material_masses"],
+                    R["lifetime_years"]
+                )
+                for r in rows:
+                    # r = [Material, CO2_total, Recycled%, Circularity, EoL, trees_mat]
+                    lines.append(" | ".join(r))
+                lines.append("")
+                lines.append("*Estimated number of trees required to sequester the CO₂e emissions from one unit over the selected years.")
+                lines.append("")
+                lines.append("End-of-Life Summary")
+                if R['eol_summary']:
+                    for k, v in R['eol_summary'].items():
+                        lines.append(f"- {k}: {v}")
+                else:
+                    lines.append("- —")
+                lines.append("")
+                lines.append("Conclusion")
+                lines.append("Not every improvement appears in a CO₂e score. Use these insights to shape a smarter, more sustainable design.")
+                plain_txt = "\n".join(lines).encode("utf-8")
+
+                st.download_button("⬇️ Download Plain-Text Report",
+                                   data=plain_txt,
+                                   file_name=f"TCHAI_Report_{project.replace(' ','_')}.txt",
+                                   mime="text/plain")
+
 
     # Versions
     with tabs[3]:
@@ -915,32 +966,35 @@ if page == "Workspace":
                     st.success(msg) if ok else st.error(msg)
 
 # -----------------------------
-# USER GUIDE (inline DOCX only)
+# USER GUIDE (inline DOCX only, with safe fallback)
 # -----------------------------
 from pathlib import Path
+import io
 
-OFFICIAL_GUIDE = Path("/mnt/data/LCA-Light Usage Overview - Updated.docx")
-ASSET_FALLBACK = GUIDES / "LCA-Light Usage Overview - Updated.docx"  # optional if you later copy it into assets/guides
+OFFICIAL_GUIDE_NAME = "LCA-Light Usage Overview - Updated.docx"
+OFFICIAL_GUIDE_PATHS = [
+    Path("/mnt/data") / OFFICIAL_GUIDE_NAME,      # your preferred location
+    GUIDES / OFFICIAL_GUIDE_NAME,                 # persistent app assets
+]
 
-def _pick_guide():
-    if OFFICIAL_GUIDE.exists():
-        return OFFICIAL_GUIDE
-    if ASSET_FALLBACK.exists():
-        return ASSET_FALLBACK
+def _pick_existing(paths):
+    for p in paths:
+        if p.exists():
+            return p
     return None
 
-def _read_docx_text(docx_path):
-    """Extract plain text from DOCX. Tries python-docx, then docx2txt. Returns None if both unavailable."""
-    # Try python-docx (best structure)
+def _read_docx_text(docx_path: Path) -> str | None:
+    """Extract plain text from DOCX. Tries python-docx then docx2txt."""
+    # Try python-docx
     try:
         import docx  # python-docx
         d = docx.Document(str(docx_path))
         parts = []
-        for p in d.paragraphs:
-            t = (p.text or "").strip()
+        for para in d.paragraphs:
+            t = (para.text or "").strip()
             if t:
                 parts.append(t)
-        # simple table support
+        # simple tables
         for tbl in d.tables:
             if tbl.rows:
                 header = [c.text.strip() for c in tbl.rows[0].cells]
@@ -953,7 +1007,7 @@ def _read_docx_text(docx_path):
     except Exception:
         pass
 
-    # Fallback to docx2txt
+    # Try docx2txt
     try:
         import docx2txt
         txt = docx2txt.process(str(docx_path))
@@ -965,11 +1019,24 @@ if page == "User Guide":
     st.subheader("User Guide")
     st.caption("This page renders the official LCA-Light Usage Overview inline and provides a download button.")
 
-    guide_path = _pick_guide()
+    guide_path = _pick_existing(OFFICIAL_GUIDE_PATHS)
+
+    # If not found, allow a one-time upload to store the official guide in assets/guides
     if not guide_path:
-        st.error("Guide not found at:\n- /mnt/data/LCA-Light Usage Overview - Updated.docx\n(or in assets/guides with the same name)")
+        st.warning(f"Guide not found at: {OFFICIAL_GUIDE_PATHS[0]} (or in assets/guides).")
+        up = st.file_uploader(f"Upload {OFFICIAL_GUIDE_NAME}", type=["docx"], key="guide_upload")
+        if up is not None:
+            try:
+                dest = GUIDES / OFFICIAL_GUIDE_NAME
+                ensure_dir(GUIDES)
+                dest.write_bytes(up.read())
+                st.success(f"Saved guide to {dest}. Reloading…")
+                _rerun()
+            except Exception as e:
+                st.error(f"Failed to save guide: {e}")
         st.stop()
 
+    # Try to read text for inline display
     text = _read_docx_text(guide_path)
 
     if text:
@@ -982,16 +1049,17 @@ if page == "User Guide":
     else:
         st.warning(
             "Found the guide file but couldn't extract text. "
-            "Please add **python-docx** or **docx2txt** to the environment."
+            "Inline view requires **python-docx** or **docx2txt**. "
+            "You can still download the file below."
         )
 
-    # Download button
+    # Download button (always offer)
     try:
         with open(guide_path, "rb") as f:
             st.download_button(
                 "⬇️ Download the User Guide (DOCX)",
                 f,
-                file_name="LCA-Light Usage Overview - Updated.docx",
+                file_name=OFFICIAL_GUIDE_NAME,
                 type="secondary",
                 use_container_width=True,
             )
