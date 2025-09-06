@@ -919,23 +919,18 @@ if page == "Workspace":
 # -----------------------------
 from pathlib import Path
 
-# Point to the single, authoritative guide file you provided
-GUIDE_CANDIDATES = [
-    Path("/mnt/data/LCA-Light Usage Overview - Updated.docx"),
-    GUIDES / "LCA-Light Usage Overview - Updated.docx",  # optional fallback if you later move it to assets/guides
-]
+OFFICIAL_GUIDE = Path("/mnt/data/LCA-Light Usage Overview - Updated.docx")
+ASSET_FALLBACK = GUIDES / "LCA-Light Usage Overview - Updated.docx"  # optional if you later copy it into assets/guides
 
-def _first_existing(paths):
-    for p in paths:
-        if p.exists():
-            return p
+def _pick_guide():
+    if OFFICIAL_GUIDE.exists():
+        return OFFICIAL_GUIDE
+    if ASSET_FALLBACK.exists():
+        return ASSET_FALLBACK
     return None
 
-def _read_docx_text(docx_path: Path) -> str | None:
-    """
-    Return plain text extracted from DOCX.
-    Tries python-docx first; falls back to docx2txt; returns None if unavailable.
-    """
+def _read_docx_text(docx_path):
+    """Extract plain text from DOCX. Tries python-docx, then docx2txt. Returns None if both unavailable."""
     # Try python-docx (best structure)
     try:
         import docx  # python-docx
@@ -945,14 +940,12 @@ def _read_docx_text(docx_path: Path) -> str | None:
             t = (p.text or "").strip()
             if t:
                 parts.append(t)
-        # Simple table support (append after paragraphs)
+        # simple table support
         for tbl in d.tables:
             if tbl.rows:
                 header = [c.text.strip() for c in tbl.rows[0].cells]
                 if any(header):
-                    parts.append("")  # spacing
-                    parts.append(" | ".join(header))
-                    parts.append(" | ".join(["---"] * len(header)))
+                    parts += ["", " | ".join(header), " | ".join(["---"] * len(header))]
                     for r in tbl.rows[1:]:
                         parts.append(" | ".join(c.text.strip() for c in r.cells))
                     parts.append("")
@@ -960,7 +953,7 @@ def _read_docx_text(docx_path: Path) -> str | None:
     except Exception:
         pass
 
-    # Try docx2txt (lightweight)
+    # Fallback to docx2txt
     try:
         import docx2txt
         txt = docx2txt.process(str(docx_path))
@@ -972,15 +965,14 @@ if page == "User Guide":
     st.subheader("User Guide")
     st.caption("This page renders the official LCA-Light Usage Overview inline and provides a download button.")
 
-    guide_path = _first_existing(GUIDE_CANDIDATES)
+    guide_path = _pick_guide()
     if not guide_path:
-        st.error("Guide not found at: `/mnt/data/LCA-Light Usage Overview - Updated.docx`")
+        st.error("Guide not found at:\n- /mnt/data/LCA-Light Usage Overview - Updated.docx\n(or in assets/guides with the same name)")
         st.stop()
 
     text = _read_docx_text(guide_path)
 
     if text:
-        # Scrollable inline view
         st.text_area(
             label="",
             value=text,
@@ -989,11 +981,11 @@ if page == "User Guide":
         )
     else:
         st.warning(
-            "I found the guide file but couldn't extract the text. "
+            "Found the guide file but couldn't extract text. "
             "Please add **python-docx** or **docx2txt** to the environment."
         )
 
-    # Download button (always shown if file readable)
+    # Download button
     try:
         with open(guide_path, "rb") as f:
             st.download_button(
