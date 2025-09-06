@@ -977,6 +977,28 @@ def _docx_to_markdown(doc_path: Path) -> str:
                 lines.append("")
 
     return "\n".join(lines).strip()
+    
+# ---------- User Guide (PDF) helper ----------
+def render_pdf_inline(pdf_path: Path, title: str = "📘 LCA-Light Usage Overview (PDF)"):
+    """
+    Renders a local PDF inline using an iframe (no python-docx needed).
+    """
+    try:
+        pdf_bytes = Path(pdf_path).read_bytes()
+    except Exception as e:
+        st.warning(f"Could not read PDF at {pdf_path}: {e}")
+        return
+
+    b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    st.markdown(f"### {title}")
+    html = f"""
+    <iframe
+        src="data:application/pdf;base64,{b64}"
+        width="100%" height="900"
+        style="border:none;border-radius:8px;"
+    ></iframe>
+    """
+    st.components.v1.html(html, height=920, scrolling=True)
 
 if page == "User Guide":
     st.subheader("User Guide")
@@ -1006,45 +1028,35 @@ if page == "User Guide":
         Path("/mnt/data/LCA Tool.pdf"),
     ]
 
-    # 1) Render the LCA-Light Usage Overview inline
+       # 1) Render the LCA-Light Usage Overview inline (DOCX if possible, else PDF)
     st.markdown("### 📘 LCA-Light Usage Overview (inline)")
     docx_path = _find_first_existing(lca_light_candidates)
+    rendered = False
 
     if docx_path and DOCX_OK:
         try:
             md = _docx_to_markdown(docx_path)
             if md:
                 st.markdown(md)
+                rendered = True
             else:
-                st.warning("Could not render the DOCX content (empty result). You can still download the file below.")
+                st.info("DOCX found but produced no content. Falling back to PDF inline.")
         except Exception as e:
-            st.error(f"Failed to render the DOCX: {e}")
-    else:
-        if not DOCX_OK:
-            st.warning("`python-docx` is not available, so inline rendering is disabled.")
+            st.info(f"DOCX rendering failed ({e}). Falling back to PDF inline.")
+
+    if not rendered:
+        # PDF fallback (works without python-docx)
+        pdf_inline = _find_first_existing(redesign_pdf_candidates) or _find_first_existing(slides_pdf_candidates)
+        if pdf_inline:
+            with st.expander("📘 LCA-Light User Guide (PDF inline)", expanded=True):
+                render_pdf_inline(pdf_inline, title="📘 LCA-Light Usage Overview (PDF)")
         else:
-            st.info("Couldn’t find the LCA-Light Usage Overview DOCX in assets/guides or /mnt/data.")
+            # Nothing to render inline
+            if not DOCX_OK:
+                st.warning("`python-docx` not installed and no PDF found in assets/guides/. Add a PDF (e.g., 'LCA Tool Redesign V2 (1).pdf').")
+            else:
+                st.info("No DOCX/PDF guide found in assets/guides/ or /mnt/data/.")
 
-    st.divider()
-
-    # 2) Download section for all guides
-    st.markdown("### ⬇️ Downloads")
-
-    def show_download(label: str, candidates: List[Path]) -> bool:
-        p = _find_first_existing(candidates)
-        if p:
-            st.markdown(f"**{label}** — {p.name}")
-            st.download_button("Download", data=p.read_bytes(), file_name=p.name)
-            return True
-        return False
-
-    found_any = False
-    found_any |= show_download("LCA-Light Usage Overview (DOCX)", lca_light_candidates)
-    found_any |= show_download("Text Report of the Easy LCA Tool (DOCX)", text_report_candidates)
-    found_any |= show_download("LCA Tool Redesign V2 (PDF)", redesign_pdf_candidates)
-    found_any |= show_download("LCA Tool (slides PDF)", slides_pdf_candidates)
-
-    if not found_any:
-        st.info("No guide files found yet. Place your PDFs/DOCX in 'assets/guides' and refresh.")
 
     st.stop()
+
