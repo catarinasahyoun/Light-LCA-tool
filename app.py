@@ -18,6 +18,17 @@ from io import BytesIO
 # ✓ PDF Report: smart-filled from live inputs; DOCX fallback if PDF backend missing
 # ✓ Safe folder creation (avoids FileExistsError)
 # ================================
+def render_user_guide():
+    guide_path = GUIDES / "LCA-Light Usage Overview (1).docx"
+    if guide_path.exists():
+        doc = Document(guide_path)
+        st.subheader("📘 LCA-Light Usage Overview")
+        for para in doc.paragraphs:
+            if para.text.strip():
+                st.markdown(para.text)
+    else:
+        st.error(f"Guide not found at {guide_path}. Place the DOCX in assets/guides/")
+
 
 st.set_page_config(
     page_title="TCHAI — Easy LCA Indicator",
@@ -970,91 +981,49 @@ if page == "Workspace":
                     ok, msg = vm.delete(sel)
                     st.success(msg) if ok else st.error(msg)
 
-# -----------------------------
-# USER GUIDE (inline DOCX only, with one-time upload fallback)
-# -----------------------------
-from typing import Optional as _Optional  # avoid shadowing
+# ------------------------------------------------------------------
+# USER GUIDE PAGE (renders inline DOCX)
+# ------------------------------------------------------------------
+from pathlib import Path
 
-def _read_docx_text(docx_path: Path) -> _Optional[str]:
-    """Extract plain text from DOCX. Tries python-docx then docx2txt."""
-    # Try python-docx
+def _read_docx_text(docx_path: Path):
+    """Extract plain text from DOCX using python-docx."""
     try:
-        import docx  # python-docx
+        import docx
         d = docx.Document(str(docx_path))
         parts = []
         for para in d.paragraphs:
-            t = (para.text or "").strip()
-            if t:
-                parts.append(t)
-        # simple tables
+            if para.text.strip():
+                parts.append(para.text.strip())
         for tbl in d.tables:
             if tbl.rows:
                 header = [c.text.strip() for c in tbl.rows[0].cells]
                 if any(header):
-                    parts += ["", " | ".join(header), " | ".join(["---"] * len(header))]
+                    parts += ["", " | ".join(header), " | ".join(["---"]*len(header))]
                     for r in tbl.rows[1:]:
                         parts.append(" | ".join(c.text.strip() for c in r.cells))
                     parts.append("")
         return "\n\n".join(parts).strip()
-    except Exception:
-        pass
-    # Try docx2txt
-    try:
-        import docx2txt
-        txt = docx2txt.process(str(docx_path))
-        return (txt or "").strip()
-    except Exception:
-        return None
+    except Exception as e:
+        return f"⚠️ Could not parse DOCX: {e}"
 
-if page == "User Guide":
-    st.subheader("User Guide")
-    st.caption("This page renders the official LCA-Light Usage Overview inline and provides a download button.")
+st.markdown("---")
+st.header("📘 User Guide")
 
-    OFFICIAL_GUIDE_NAME = "LCA-Light Usage Overview - Updated.docx"
-    PRIMARY_GUIDE_PATH = Path("/mnt/data") / OFFICIAL_GUIDE_NAME
-    FALLBACK_GUIDE_PATH = GUIDES / OFFICIAL_GUIDE_NAME
+guide_candidates = [
+    Path("/mnt/data/LCA-Light Usage Overview (1).docx"),
+    Path("assets/guides/LCA-Light Usage Overview (1).docx"),
+]
+guide_path = next((p for p in guide_candidates if p.exists()), None)
 
-    guide_path = PRIMARY_GUIDE_PATH if PRIMARY_GUIDE_PATH.exists() else (FALLBACK_GUIDE_PATH if FALLBACK_GUIDE_PATH.exists() else None)
-
-    if not guide_path:
-        st.warning(f"Guide not found at: {PRIMARY_GUIDE_PATH} (or {FALLBACK_GUIDE_PATH}).")
-        up = st.file_uploader(f"Upload {OFFICIAL_GUIDE_NAME}", type=["docx"], key="guide_upload")
-        if up is not None:
-            try:
-                ensure_dir(GUIDES)
-                FALLBACK_GUIDE_PATH.write_bytes(up.read())
-                st.success(f"Saved guide to {FALLBACK_GUIDE_PATH}. Reloading…")
-                _rerun()
-            except Exception as e:
-                st.error(f"Failed to save guide: {e}")
-        st.stop()
-
+if guide_path:
+    st.success(f"Loaded guide: {guide_path.name}")
     text = _read_docx_text(guide_path)
-
     if text:
-        st.text_area(
-            label="",
-            value=text,
-            height=600,
-            label_visibility="collapsed"
-        )
+        st.text_area("User Guide Content", value=text, height=600, label_visibility="collapsed")
     else:
-        st.warning(
-            "Found the guide file but couldn't extract text. "
-            "Inline view requires **python-docx** or **docx2txt**. "
-            "You can still download the file below."
-        )
-
-    try:
-        with open(guide_path, "rb") as f:
-            st.download_button(
-                "⬇️ Download the User Guide (DOCX)",
-                f,
-                file_name=OFFICIAL_GUIDE_NAME,
-                type="secondary",
-                use_container_width=True,
-            )
-    except Exception:
-        st.info("Download unavailable (couldn't open the DOCX file).")
-
-    st.stop()
+        st.warning("Guide file found but no text could be extracted.")
+    with open(guide_path, "rb") as f:
+        st.download_button("⬇️ Download User Guide", f, file_name=guide_path.name)
+else:
+    st.error("No User Guide file found. Place it in `/mnt/data/` or `assets/guides/`.")
