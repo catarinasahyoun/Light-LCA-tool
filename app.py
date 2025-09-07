@@ -982,9 +982,8 @@ if page == "Workspace":
                     st.success(msg) if ok else st.error(msg)
 
 # ------------------------------------------------------------------
-# USER GUIDE (download-only, pick most recent file)
+# USER GUIDE — download-only (no upload UI)
 # ------------------------------------------------------------------
-import shutil
 from mimetypes import guess_type
 
 def _latest_guide() -> Optional[Path]:
@@ -992,8 +991,11 @@ def _latest_guide() -> Optional[Path]:
     exts = {".docx", ".pdf", ".md"}
     candidates: list[Path] = []
 
+    # Prefer committed files in the repo
     if GUIDES.exists():
         candidates += [p for p in GUIDES.iterdir() if p.is_file() and p.suffix.lower() in exts]
+
+    # Runtime-mounted files (optional)
     mnt = Path("/mnt/data")
     if mnt.exists():
         candidates += [p for p in mnt.iterdir() if p.is_file() and p.suffix.lower() in exts]
@@ -1001,7 +1003,7 @@ def _latest_guide() -> Optional[Path]:
     if not candidates:
         return None
 
-    # Prefer assets/guides; if ties, newest mtime wins
+    # Sort: prefer assets/guides; then by newest mtime
     def sort_key(p: Path):
         pref = 0 if str(p.parent) == str(GUIDES) else 1
         try:
@@ -1013,30 +1015,19 @@ def _latest_guide() -> Optional[Path]:
     candidates.sort(key=sort_key)
     return candidates[0]
 
-def _save_uploaded_guide(file) -> Optional[Path]:
-    """Save uploaded guide into assets/guides/."""
-    try:
-        dest = GUIDES / file.name
-        ensure_dir(GUIDES)
-        dest.write_bytes(file.read())
-        return dest
-    except Exception:
-        return None
-
 if page == "User Guide":
     st.header("📘 User Guide")
 
     latest = _latest_guide()
 
     if latest is None:
-        st.info("No guide found. Upload one below to make it available for download.")
-        up = st.file_uploader("Upload guide (.docx, .pdf, .md)", type=["docx","pdf","md"], key="guide_up_simple")
-        if up is not None:
-            saved = _save_uploaded_guide(up)
-            if saved:
-                st.success(f"Uploaded **{saved.name}**. Reopen this page to see the download button.")
-            else:
-                st.error("Upload failed. Check write permissions for assets/guides/.")
+        st.warning(
+            "No User Guide is available yet.\n\n"
+            "Ask an admin to add one of these files to the project:\n"
+            "• `assets/guides/LCA_userguide.docx` (recommended, committed to repo)\n"
+            "• or place a runtime file at `/mnt/data/LCA_userguide.docx`"
+        )
+        st.caption("Supported extensions: .docx, .pdf, .md — the newest file will be offered automatically.")
         st.stop()
 
     # We have a guide → show a single download button
@@ -1044,13 +1035,11 @@ if page == "User Guide":
         data = latest.read_bytes()
         mime, _ = guess_type(latest.name)
         if not mime:
-            # sensible defaults
-            ext = latest.suffix.lower()
             mime = {
                 ".pdf": "application/pdf",
                 ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 ".md": "text/markdown",
-            }.get(ext, "application/octet-stream")
+            }.get(latest.suffix.lower(), "application/octet-stream")
 
         st.success(f"Latest user guide: **{latest.name}**")
         st.download_button(
@@ -1060,6 +1049,10 @@ if page == "User Guide":
             mime=mime,
             use_container_width=True,
         )
-        st.caption("Place newer versions in `assets/guides/` (committed) or `/mnt/data/` (runtime) — the newest is offered automatically.")
+        st.caption(
+            "To update: commit a newer file under `assets/guides/` "
+            "(or replace the runtime file in `/mnt/data/`)."
+        )
     except Exception as e:
         st.error(f"Could not read the guide file: {e}")
+
