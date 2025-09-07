@@ -982,163 +982,84 @@ if page == "Workspace":
                     st.success(msg) if ok else st.error(msg)
 
 # ------------------------------------------------------------------
-# USER GUIDE PAGE (robust: search, debug, upload fallback)
+# USER GUIDE (download-only, pick most recent file)
 # ------------------------------------------------------------------
-import base64, shutil, io
+import shutil
+from mimetypes import guess_type
 
-def _embed_pdf(bytes_: bytes, height: int = 760):
-    b64 = base64.b64encode(bytes_).decode()
-    html = f"""
-    <iframe
-      src="data:application/pdf;base64,{b64}"
-      style="width:100%;height:{height}px;border:1px solid #e5e7eb;border-radius:12px"
-    ></iframe>
-    """
-    st.components.v1.html(html, height=height + 18)
+def _latest_guide() -> Optional[Path]:
+    """Find the newest .docx/.pdf/.md in assets/guides (preferred) or /mnt/data."""
+    exts = {".docx", ".pdf", ".md"}
+    candidates: list[Path] = []
 
-def _read_docx_text(docx_path: Path) -> str:
-    if not DOCX_OK:
-        return "⚠️ python-docx isn't available here, so DOCX can't be shown inline. Use Download below."
-    try:
-        import docx
-        d = docx.Document(str(docx_path))
-        parts = []
-        for p in d.paragraphs:
-            t = p.text.strip()
-            if t:
-                parts.append(t)
-        for tbl in d.tables:
-            if tbl.rows:
-                header = [c.text.strip() for c in tbl.rows[0].cells]
-                if any(header):
-                    parts += ["", " | ".join(header), " | ".join(["---"] * len(header))]
-                    for r in tbl.rows[1:]:
-                        parts.append(" | ".join(c.text.strip() for c in r.cells))
-                    parts.append("")
-        return "\n\n".join(parts).strip()
-    except Exception as e:
-        return f"⚠️ Could not parse DOCX: {e}"
-
-@st.cache_data(show_spinner=False)
-def _load_bytes(p: Path) -> bytes:
-    return p.read_bytes()
-
-def _safe_write(dest: Path, data: bytes):
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(data)
-
-def _bootstrap_copy_candidates():
-    """
-    If a guide exists in /mnt/data or cwd but not in assets/guides, copy it once.
-    """
-    candidates = [
-        Path("/mnt/data/LCA_userguide.docx"),
-        Path("/mnt/data/UserGuide.docx"),
-        BASE / "LCA_userguide.docx",
-        BASE / "UserGuide.docx",
-    ]
-    for src in candidates:
-        if src.exists():
-            dest = GUIDES / src.name
-            if not dest.exists():
-                try:
-                    shutil.copy2(src, dest)
-                except Exception:
-                    pass
-
-def _find_guides() -> list[Path]:
-    """
-    Return available guide files from:
-      1) assets/guides (preferred),
-      2) /mnt/data,
-      3) whole repo (fallback).
-    """
-    _bootstrap_copy_candidates()
-    exts = {".docx", ".md", ".pdf"}
-    found = []
-
-    # 1) assets/guides
     if GUIDES.exists():
-        for p in GUIDES.iterdir():
-            if p.is_file() and p.suffix.lower() in exts:
-                found.append(p)
-
-    # 2) /mnt/data
+        candidates += [p for p in GUIDES.iterdir() if p.is_file() and p.suffix.lower() in exts]
     mnt = Path("/mnt/data")
     if mnt.exists():
-        for p in mnt.iterdir():
-            if p.is_file() and p.suffix.lower() in exts:
-                found.append(p)
+        candidates += [p for p in mnt.iterdir() if p.is_file() and p.suffix.lower() in exts]
 
-    # 3) repo-wide fallback (only if nothing found yet)
-    if not found:
-        for p in BASE.rglob("*"):
-            try:
-                if p.is_file() and p.suffix.lower() in exts:
-                    # ignore venv/hidden dirs for speed
-                    if any(seg.startswith(".") for seg in p.parts):
-                        continue
-                    found.append(p)
-            except Exception:
-                continue
+    if not candidates:
+        return None
 
-    # de-duplicate by filename (prefer assets/guides copy)
-    uniq, seen = [], set()
-    order_pref = {str(GUIDES): 0, "/mnt/data": 1, str(BASE): 2}
-    found.sort(key=lambda p: (order_pref.get(str(p.parent), 3), p.name.lower()))
-    for p in found:
-        if p.name not in seen:
-            uniq.append(p); seen.add(p.name)
-    return uniq
+    # Prefer assets/guides; if ties, newest mtime wins
+    def sort_key(p: Path):
+        pref = 0 if str(p.parent) == str(GUIDES) else 1
+        try:
+            mtime = p.stat().st_mtime
+        except Exception:
+            mtime = 0
+        return (pref, -mtime, p.name.lower())
 
-def _debug_paths_panel(guides: list[Path]):
-    with st.expander("🔎 Debug: paths & detected guides", expanded=False):
-        st.code(
-            f"cwd: {Path.cwd()}\n"
-            f"BASE: {BASE}\n"
-            f"ASSETS exists: {ASSETS.exists()}\n"
-            f"GUIDES: {GUIDES} (exists={GUIDES.exists()})\n"
-            f"/mnt/data exists: {Path('/mnt/data').exists()}\n"
-            f"Detected guides:\n  - " + "\n  - ".join(str(g) for g in guides) if guides else
-            f"cwd: {Path.cwd()}\nBASE: {BASE}\nASSETS exists: {ASSETS.exists()}\nGUIDES: {GUIDES} (exists={GUIDES.exists()})\n/mnt/data exists: {Path('/mnt/data').exists()}\nDetected guides: (none)"
-        )
+    candidates.sort(key=sort_key)
+    return candidates[0]
+
+def _save_uploaded_guide(file) -> Optional[Path]:
+    """Save uploaded guide into assets/guides/."""
+    try:
+        dest = GUIDES / file.name
+        ensure_dir(GUIDES)
+        dest.write_bytes(file.read())
+        return dest
+    except Exception:
+        return None
 
 if page == "User Guide":
     st.header("📘 User Guide")
 
-    guides = _find_guides()
-    _debug_paths_panel(guides)
+    latest = _latest_guide()
 
-    if not guides:
-        st.error("No User Guide file found. You can upload one below, or place a `.docx`, `.md`, or `.pdf` in `assets/guides/`.")
-        up = st.file_uploader("Upload a guide (.docx, .md, .pdf)", type=["docx","md","pdf"], key="guide_upload")
+    if latest is None:
+        st.info("No guide found. Upload one below to make it available for download.")
+        up = st.file_uploader("Upload guide (.docx, .pdf, .md)", type=["docx","pdf","md"], key="guide_up_simple")
         if up is not None:
-            try:
-                dest = GUIDES / up.name
-                _safe_write(dest, up.read())
-                st.success(f"Saved to {dest}. Please click 'Rerun' or change page and come back.")
-            except Exception as e:
-                st.error(f"Upload failed: {e}")
+            saved = _save_uploaded_guide(up)
+            if saved:
+                st.success(f"Uploaded **{saved.name}**. Reopen this page to see the download button.")
+            else:
+                st.error("Upload failed. Check write permissions for assets/guides/.")
         st.stop()
 
-    sel = st.selectbox("Select a guide", guides, index=0, format_func=lambda p: p.name)
-    st.success(f"Loaded guide: **{sel.name}**")
-
+    # We have a guide → show a single download button
     try:
-        data = _load_bytes(sel)
-        ext = sel.suffix.lower()
+        data = latest.read_bytes()
+        mime, _ = guess_type(latest.name)
+        if not mime:
+            # sensible defaults
+            ext = latest.suffix.lower()
+            mime = {
+                ".pdf": "application/pdf",
+                ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".md": "text/markdown",
+            }.get(ext, "application/octet-stream")
 
-        if ext == ".md":
-            st.markdown(data.decode("utf-8"))
-        elif ext == ".docx":
-            text = _read_docx_text(sel)
-            if text.strip():
-                st.text_area("User Guide", value=text, height=640, label_visibility="collapsed")
-            else:
-                st.warning("Guide found but no text could be extracted. Try downloading it below.")
-        elif ext == ".pdf":
-            _embed_pdf(data, height=760)
-
-        st.download_button("⬇️ Download User Guide", data=data, file_name=sel.name)
+        st.success(f"Latest user guide: **{latest.name}**")
+        st.download_button(
+            "⬇️ Download User Guide",
+            data=data,
+            file_name=latest.name,
+            mime=mime,
+            use_container_width=True,
+        )
+        st.caption("Place newer versions in `assets/guides/` (committed) or `/mnt/data/` (runtime) — the newest is offered automatically.")
     except Exception as e:
-        st.error(f"Failed to open guide: {e}")
+        st.error(f"Could not read the guide file: {e}")
