@@ -14,21 +14,10 @@ from io import BytesIO
 # ✓ Settings → Upload & Activate a PERMANENT database (persists until changed)
 # ✓ Inputs: tolerant parsing, NO Excel previews, clear process dropdowns
 # ✓ Workspace: Results & Comparison → Final Summary → Report (PDF) → Versions
-# ✓ User Guide: visible in sidebar, reads from assets/guides/ (with /mnt/data fallbacks)
+# ✓ User Guide: first page after sign-in; download-only (no uploads)
 # ✓ PDF Report: smart-filled from live inputs; DOCX fallback if PDF backend missing
 # ✓ Safe folder creation (avoids FileExistsError)
 # ================================
-def render_user_guide():
-    guide_path = GUIDES / "LCA-Light Usage Overview (1).docx"
-    if guide_path.exists():
-        doc = Document(guide_path)
-        st.subheader("📘 LCA-Light Usage Overview")
-        for para in doc.paragraphs:
-            if para.text.strip():
-                st.markdown(para.text)
-    else:
-        st.error(f"Guide not found at {guide_path}. Place the DOCX in assets/guides/")
-
 
 st.set_page_config(
     page_title="TCHAI — Easy LCA Indicator",
@@ -320,7 +309,7 @@ with st.sidebar:
     st.markdown(f"<div style='display:flex;justify-content:center;margin-bottom:10px'>{logo_tag(64)}</div>", unsafe_allow_html=True)
     if st.session_state.auth_user:
         # Make User Guide FIRST after sign-in
-        page = st.radio("Navigate", ["User Guide", "Inputs", "Workspace", "Settings"], index=0)
+        page = st.radio("Navigate", ["User Guide", "Inputs", "Workspace", "Settings"], index=0, key="nav")
         st.markdown("<div class='nav-note'>Workspace order: Results & Comparison → Final Summary → Report → Versions.</div>", unsafe_allow_html=True)
     else:
         page = "Sign in"
@@ -389,6 +378,8 @@ if not st.session_state.auth_user:
                 st.error("Wrong password.")
             else:
                 st.session_state.auth_user = u
+                # Force nav to "User Guide" immediately after sign-in
+                st.session_state.nav = "User Guide"
                 st.success("Welcome!")
                 _rerun()
     with t2:
@@ -1055,4 +1046,3 @@ if page == "User Guide":
         )
     except Exception as e:
         st.error(f"Could not read the guide file: {e}")
-
