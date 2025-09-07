@@ -982,11 +982,11 @@ if page == "Workspace":
                     st.success(msg) if ok else st.error(msg)
 
 # ------------------------------------------------------------------
-# USER GUIDE PAGE (renders inline DOCX)
+# USER GUIDE PAGE (first page after sign-in) — uses assets/guides + /mnt/data
 # ------------------------------------------------------------------
+import base64, shutil
 
-def _embed_pdf(bytes_: bytes, height: int = 700):
-    """Inline PDF viewer using a data URL iframe."""
+def _embed_pdf(bytes_: bytes, height: int = 760):
     b64 = base64.b64encode(bytes_).decode()
     html = f"""
     <iframe
@@ -997,16 +997,18 @@ def _embed_pdf(bytes_: bytes, height: int = 700):
     st.components.v1.html(html, height=height + 18)
 
 def _read_docx_text(docx_path: Path) -> str:
-    """Extract plain text+tables from DOCX using python-docx if available."""
     if not DOCX_OK:
-        return "⚠️ python-docx is not installed in this environment, so DOCX cannot be parsed inline.\nUse the Download button below."
+        return "⚠️ python-docx isn't available here, so DOCX can't be shown inline. Use Download below."
     try:
         import docx
         d = docx.Document(str(docx_path))
         parts = []
-        for para in d.paragraphs:
-            if para.text.strip():
-                parts.append(para.text.strip())
+        # paragraphs
+        for p in d.paragraphs:
+            t = p.text.strip()
+            if t:
+                parts.append(t)
+        # simple tables → markdown-ish
         for tbl in d.tables:
             if tbl.rows:
                 header = [c.text.strip() for c in tbl.rows[0].cells]
@@ -1023,20 +1025,33 @@ def _read_docx_text(docx_path: Path) -> str:
 def _load_bytes(p: Path) -> bytes:
     return p.read_bytes()
 
+def _bootstrap_guide():
+    """If a guide exists in /mnt/data but not in assets/guides, copy it once."""
+    src = Path("/mnt/data/LCA_userguide.docx")
+    dest = GUIDES / "LCA_userguide.docx"
+    if src.exists() and not dest.exists():
+        try:
+            shutil.copy2(src, dest)
+        except Exception:
+            pass
+
 def _find_guides() -> list[Path]:
     """Return available guide files from both assets/guides and /mnt/data."""
+    _bootstrap_guide()
     locations = [GUIDES, Path("/mnt/data")]
     exts = {".docx", ".md", ".pdf"}
     found = []
     for loc in locations:
-        try:
-            if loc.exists():
-                for p in sorted(loc.iterdir(), key=lambda x: x.name.lower()):
-                    if p.suffix.lower() in exts and p.is_file():
-                        found.append(p)
-        except Exception:
-            pass
-    return found
+        if loc.exists():
+            for p in sorted(loc.iterdir(), key=lambda x: x.name.lower()):
+                if p.is_file() and p.suffix.lower() in exts:
+                    found.append(p)
+    # de-duplicate by name (prefer assets/guides copy)
+    uniq, seen = [], set()
+    for p in found:
+        if p.name not in seen:
+            uniq.append(p); seen.add(p.name)
+    return uniq
 
 if page == "User Guide":
     st.header("📘 User Guide")
@@ -1044,10 +1059,9 @@ if page == "User Guide":
     guides = _find_guides()
     if not guides:
         st.error("No User Guide file found. Place a `.docx`, `.md`, or `.pdf` in `assets/guides/` or `/mnt/data/`.")
-        st.caption("Tip: name it something like `LCA_User_Guide.docx` and commit it under `assets/guides/`.")
+        st.caption("Tip: commit `assets/guides/LCA_userguide.docx` to your repo.")
     else:
-        # Simple selector if multiple guides exist
-        sel = st.selectbox("Select a guide", options=guides, format_func=lambda p: p.name, index=0)
+        sel = st.selectbox("Select a guide", guides, index=0, format_func=lambda p: p.name)
         st.success(f"Loaded guide: **{sel.name}**")
 
         ext = sel.suffix.lower()
@@ -1055,22 +1069,19 @@ if page == "User Guide":
             data = _load_bytes(sel)
 
             if ext == ".md":
-                st.markdown(data.decode("utf-8"), unsafe_allow_html=False)
+                st.markdown(data.decode("utf-8"))
 
             elif ext == ".docx":
                 text = _read_docx_text(sel)
                 if text.strip():
-                    # use a text_area for long content; preserves layout and allows copy
-                    st.text_area("User Guide", value=text, height=600, label_visibility="collapsed")
+                    st.text_area("User Guide", value=text, height=640, label_visibility="collapsed")
                 else:
-                    st.warning("Guide file found but no text could be extracted. Try downloading it below.")
+                    st.warning("Guide found but no text could be extracted. Try downloading it below.")
 
             elif ext == ".pdf":
                 _embed_pdf(data, height=760)
 
-            # Download button for the original file
             st.download_button("⬇️ Download User Guide", data=data, file_name=sel.name)
 
         except Exception as e:
             st.error(f"Failed to open guide: {e}")
-
