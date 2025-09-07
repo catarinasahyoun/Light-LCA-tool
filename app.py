@@ -973,76 +973,166 @@ if page == "Workspace":
                     st.success(msg) if ok else st.error(msg)
 
 # ------------------------------------------------------------------
-# USER GUIDE — download-only (no upload UI)
+# USER GUIDE — inline display (PDF/MD/DOCX) with graceful fallbacks
 # ------------------------------------------------------------------
 from mimetypes import guess_type
+import base64
 
-def _latest_guide() -> Optional[Path]:
-    """Find the newest .docx/.pdf/.md in assets/guides (preferred) or /mnt/data."""
-    exts = {".docx", ".pdf", ".md"}
-    candidates: list[Path] = []
+# optional capability flags
+MAMMOTH_OK = False
+try:
+    import mammoth  # pip install mammoth
+    MAMMOTH_OK = True
+except Exception:
+    MAMMOTH_OK = False
 
-    # Prefer committed files in the repo
-    if GUIDES.exists():
-        candidates += [p for p in GUIDES.iterdir() if p.is_file() and p.suffix.lower() in exts]
+def _pick_guide() -> Optional[Path]:
+    """
+    Choose the best guide to display:
+      1) Prefer PDF (best inline) in assets/guides, then /mnt/data
+      2) Then Markdown
+      3) Then DOCX
+    """
+    search_dirs = [GUIDES, Path("/mnt/data")]
+    prefer = [".pdf", ".md", ".docx"]  # order of preference
+    found = []
+    for d in search_dirs:
+        if d.exists():
+            for p in d.iterdir():
+                if p.is_file() and p.suffix.lower() in {".pdf", ".md", ".docx"}:
+                    found.append(p)
 
-    # Runtime-mounted files (optional)
-    mnt = Path("/mnt/data")
-    if mnt.exists():
-        candidates += [p for p in mnt.iterdir() if p.is_file() and p.suffix.lower() in exts]
-
-    if not candidates:
+    if not found:
         return None
 
-    # Sort: prefer assets/guides; then by newest mtime
-    def sort_key(p: Path):
-        pref = 0 if str(p.parent) == str(GUIDES) else 1
+    # prefer assets/guides over /mnt/data, then by extension preference, then newest mtime
+    def score(p: Path):
+        in_guides = 0 if str(p.parent) == str(GUIDES) else 1
+        ext_rank = prefer.index(p.suffix.lower()) if p.suffix.lower() in prefer else 99
         try:
-            mtime = p.stat().st_mtime
+            mtime = -p.stat().st_mtime
         except Exception:
             mtime = 0
-        return (pref, -mtime, p.name.lower())
+        return (in_guides, ext_rank, mtime, p.name.lower())
 
-    candidates.sort(key=sort_key)
-    return candidates[0]
+    found.sort(key=score)
+    return found[0]
+
+def _embed_pdf(bytes_: bytes, height: int = 760):
+    """Inline PDF viewer using a base64 data URL iframe."""
+    b64 = base64.b64encode(bytes_).decode()
+    html = f"""
+    <iframe
+      src="data:application/pdf;base64,{b64}"
+      style="width:100%;height:{height}px;border:1px solid #e5e7eb;border-radius:12px"
+    ></iframe>
+    """
+    st.components.v1.html(html, height=height + 18)
+
+def _render_docx_as_html(docx_path: Path) -> Optional[str]:
+    """
+    Try to convert DOCX -> HTML with mammoth (best-looking). Returns HTML or None.
+    """
+    if not MAMMOTH_OK:
+        return None
+    try:
+        with open(docx_path, "rb") as f:
+            result = mammoth.convert_to_html(f)
+        html = result.value  # type: ignore[attr-defined]
+        return html if html and html.strip() else None
+    except Exception:
+        return None
+
+def _render_docx_as_text(docx_path: Path) -> Optional[str]:
+    """
+    Fallback: extract plain text + simple tables with python-docx.
+    """
+    if not DOCX_OK:
+        return None
+    try:
+        import docx
+        d = docx.Document(str(docx_path))
+        parts = []
+        for para in d.paragraphs:
+            t = para.text.strip()
+            if t:
+                parts.append(t)
+        for tbl in d.tables:
+            if tbl.rows:
+                header = [c.text.strip() for c in tbl.rows[0].cells]
+                if any(header):
+                    parts += ["", " | ".join(header), " | ".join(["---"] * len(header))]
+                    for r in tbl.rows[1:]:
+                        parts.append(" | ".join(c.text.strip() for c in r.cells))
+                    parts.append("")
+        text = "\n\n".join(parts).strip()
+        return text if text else None
+    except Exception:
+        return None
+
+@st.cache_data(show_spinner=False)
+def _load_bytes(p: Path) -> bytes:
+    return p.read_bytes()
 
 if page == "User Guide":
     st.header("📘 User Guide")
 
-    latest = _latest_guide()
-
-    if latest is None:
+    guide = _pick_guide()
+    if not guide:
         st.warning(
             "No User Guide is available yet.\n\n"
-            "Ask an admin to add one of these files to the project:\n"
-            "• `assets/guides/LCA_userguide.docx` (recommended, committed to repo)\n"
-            "• or place a runtime file at `/mnt/data/LCA_userguide.docx`"
+            "Ask an admin to add a file under `assets/guides/` (preferred) or `/mnt/data/`.\n"
+            "Supported: .pdf (best), .md, .docx"
         )
-        st.caption("Supported extensions: .docx, .pdf, .md — the newest file will be offered automatically.")
         st.stop()
 
-    # We have a guide → show a single download button
+    # Try to render inline based on extension
+    ext = guide.suffix.lower()
     try:
-        data = latest.read_bytes()
-        mime, _ = guess_type(latest.name)
+        data = _load_bytes(guide)
+
+        if ext == ".pdf":
+            st.success(f"Showing: **{guide.name}**")
+            _embed_pdf(data, height=760)
+
+        elif ext == ".md":
+            st.success(f"Showing: **{guide.name}**")
+            try:
+                st.markdown(data.decode("utf-8"))
+            except Exception:
+                st.info("Could not decode Markdown as UTF-8. Offering download instead.")
+
+        elif ext == ".docx":
+            # 1) Best effort HTML via mammoth
+            html = _render_docx_as_html(guide)
+            if html:
+                st.success(f"Showing: **{guide.name}**")
+                st.markdown(html, unsafe_allow_html=True)
+            else:
+                # 2) Fallback: plain text via python-docx
+                txt = _render_docx_as_text(guide)
+                if txt:
+                    st.success(f"Showing: **{guide.name}**")
+                    st.text_area("User Guide", value=txt, height=640, label_visibility="collapsed")
+                else:
+                    st.info("Inline preview unavailable in this environment. You can download the guide below.")
+
+        # Always provide download as a safety net
+        mime, _ = guess_type(guide.name)
         if not mime:
             mime = {
                 ".pdf": "application/pdf",
                 ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 ".md": "text/markdown",
-            }.get(latest.suffix.lower(), "application/octet-stream")
+            }.get(ext, "application/octet-stream")
 
-        st.success(f"Latest user guide: **{latest.name}**")
         st.download_button(
             "⬇️ Download User Guide",
             data=data,
-            file_name=latest.name,
+            file_name=guide.name,
             mime=mime,
             use_container_width=True,
         )
-        st.caption(
-            "To update: commit a newer file under `assets/guides/` "
-            "(or replace the runtime file in `/mnt/data/`)."
-        )
+
     except Exception as e:
-        st.error(f"Could not read the guide file: {e}")
+        st.error(f"Failed to load the guide: {e}")
