@@ -373,15 +373,15 @@ with st.sidebar:
     st.markdown(f"<div style='display:flex;justify-content:center;margin-bottom:10px'>{logo_tag(64)}</div>", unsafe_allow_html=True)
     if st.session_state.auth_user:
         # Display labels with Title Case + trailing period, but map back to original page keys
-        nav_labels = ["User Guide.", "Inputs.", "Workspace.", "Versions.", "Settings."]
+        nav_labels = ["User Guide", "Inputs", "Workspace", "Versions", "Settings"]
         nav_map = {
-            "User Guide.": "User Guide",
-            "Inputs.": "Inputs",
-            "Workspace.": "Workspace",
-            "Versions.": "📁 Versions",  # internal value used later
-            "Settings.": "Settings",
+            "User Guide": "User Guide",
+            "Inputs": "Inputs",
+            "Workspace": "Workspace",
+            "Versions": "📁 Versions",  # internal value used later
+            "Settings": "Settings",
         }
-        sel = st.radio("Navigate.", nav_labels, index=0, key="nav")
+        sel = st.radio("Navigate", nav_labels, index=0, key="nav")
         page = nav_map[sel]
         st.markdown("<div class='nav-note'>Workspace tabs: Results & Comparison → Final Summary → Report. Versions is now a separate page.</div>", unsafe_allow_html=True)
     else:
@@ -395,7 +395,7 @@ with cl:
     st.markdown(f"{logo_tag(86)}", unsafe_allow_html=True)
 with cm:
     # Title Case + trailing period
-    st.markdown("<div class='brand-title'>Easy LCA Indicator.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='brand-title'>Easy LCA Indicator</div>", unsafe_allow_html=True)
 with cr:
     if st.session_state.auth_user:
         initials = _initials(st.session_state.auth_user)
@@ -898,7 +898,7 @@ if page == "Workspace":
     R = compute_results()
 
     # Tabs: show pretty labels, keep internal order
-    tab_labels = ["Results & Comparison.", "Final Summary.", "Report."]
+    tab_labels = ["Results & Comparison", "Final Summary", "Report"]
     t0, t1, t2 = st.tabs(tab_labels)
 
     # Results & Comparison
@@ -1359,3 +1359,4 @@ if page == "User Guide":
 
     except Exception as e:
         st.error(f"Failed to load the guide: {e}")
+
