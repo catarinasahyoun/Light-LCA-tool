@@ -310,7 +310,7 @@ with st.sidebar:
     st.markdown(f"<div style='display:flex;justify-content:center;margin-bottom:10px'>{logo_tag(64)}</div>", unsafe_allow_html=True)
     if st.session_state.auth_user:
         # Make User Guide FIRST after sign-in — now includes a dedicated Versions page
-        page = st.radio("Navigate", ["User Guide", "Inputs", "Workspace", "Versions", "Settings"], index=0, key="nav")
+        page = st.radio("Navigate", ["User Guide", "Inputs", "Results", "Versions", "Settings"], index=0, key="nav")
         st.markdown("<div class='nav-note'>Workspace tabs: Results & Comparison → Final Summary → Report. Versions is now a separate page.</div>", unsafe_allow_html=True)
     else:
         page = "Sign in"
@@ -1160,4 +1160,5 @@ if page == "User Guide":
 
     except Exception as e:
         st.error(f"Failed to load the guide: {e}")
+
 
