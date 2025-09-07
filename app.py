@@ -367,12 +367,15 @@ if "assessment" not in st.session_state:
     }
 
 # -----------------------------
+# -----------------------------
 # Sidebar (logo + nav)
 # -----------------------------
 with st.sidebar:
-    st.markdown(f"<div style='display:flex;justify-content:center;margin-bottom:10px'>{logo_tag(64)}</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='display:flex;justify-content:center;margin-bottom:10px'>{logo_tag(64)}</div>",
+        unsafe_allow_html=True
+    )
     if st.session_state.auth_user:
-        # Display labels with Title Case + trailing period, but map back to original page keys
         nav_labels = ["User Guide", "Inputs", "Workspace", "Versions", "Settings"]
         nav_map = {
             "User Guide": "User Guide",
@@ -381,11 +384,26 @@ with st.sidebar:
             "Versions": "📁 Versions",  # internal value used later
             "Settings": "Settings",
         }
-        sel = st.radio("Navigate", nav_labels, index=0, key="nav")
+
+        # 🔧 Guard against stale/invalid saved value
+        if "nav" in st.session_state and st.session_state.nav not in nav_labels:
+            st.session_state.nav = nav_labels[0]
+
+        sel = st.radio(
+            "Navigate",
+            nav_labels,
+            index=nav_labels.index(st.session_state.get("nav", nav_labels[0])),
+            key="nav",
+        )
         page = nav_map[sel]
-        st.markdown("<div class='nav-note'>Workspace tabs: Results & Comparison → Final Summary → Report. Versions is now a separate page.</div>", unsafe_allow_html=True)
+
+        st.markdown(
+            "<div class='nav-note'>Workspace tabs: Results & Comparison → Final Summary → Report. Versions is now a separate page.</div>",
+            unsafe_allow_html=True
+        )
     else:
         page = "Sign in"
+
 
 # -----------------------------
 # Header (logo, title, avatar)
@@ -1359,5 +1377,6 @@ if page == "User Guide":
 
     except Exception as e:
         st.error(f"Failed to load the guide: {e}")
+
 
 
