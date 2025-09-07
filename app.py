@@ -83,24 +83,87 @@ def logo_tag(height=86):
     return f"<img src='data:image/png;base64,{b64}' alt='TCHAI' style='height:{height}px'/>"
 
 # -----------------------------
-# Theme (B&W + purple)
+# Visual Theme (Light Oat + PP Neue Montreal + Pop color)
 # -----------------------------
-PURPLE = ['#5B21B6','#6D28D9','#7C3AED','#8B5CF6','#A78BFA','#C4B5FD']
+BG = "#E4E5DA"       # Light Oat
+POP = "#B485FF"      # Pop color for comparison charts
+
 st.markdown(
-    """
-   <style>
-     .stApp { background:#fff; color:#000; }
-     .metric { border:1px solid #111; border-radius:12px; padding:14px; text-align:center; }
-     .brand-title { font-weight:900; font-size:26px; text-align:center; }
-     .nav-note { color:#6b7280; font-size:12px; }
-     .avatar { width:36px; height:36px; border-radius:9999px; background:#111; color:#fff;
-               display:flex; align-items:center; justify-content:center; font-weight:800; }
-     .stSelectbox div[data-baseweb="select"],
-     .stNumberInput input,
-     .stTextInput input,
-     .stTextArea textarea { border:1px solid #111; }
-   </style>
-   """,
+    f"""
+    <style>
+      /* Load PP Neue Montreal (local files in assets/fonts) */
+      @font-face {{
+        font-family: 'PP Neue Montreal';
+        src: url('assets/fonts/PPNeueMontreal-Regular.woff2') format('woff2'),
+             url('assets/fonts/PPNeueMontreal-Regular.ttf') format('truetype');
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }}
+      @font-face {{
+        font-family: 'PP Neue Montreal';
+        src: url('assets/fonts/PPNeueMontreal-Medium.woff2') format('woff2'),
+             url('assets/fonts/PPNeueMontreal-Medium.ttf') format('truetype');
+        font-weight: 500;
+        font-style: normal;
+        font-display: swap;
+      }}
+
+      /* App base */
+      .stApp {{
+        background: {BG};
+        color: #000;
+        font-family: 'PP Neue Montreal', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      }}
+
+      /* Global body text = Regular */
+      html, body, [class*="css"] {{
+        font-weight: 400;
+      }}
+
+      /* Titles & Subtitles = Medium + Capitalize each word */
+      h1, h2, h3, h4, .brand-title, .stTabs [data-baseweb="tab"] p {{
+        font-weight: 500 !important;
+        text-transform: capitalize;
+        letter-spacing: 0.2px;
+      }}
+
+      /* Sidebar radio label */
+      .stRadio > label, .stRadio div[role="radiogroup"] label p {{
+        font-weight: 500;
+        text-transform: capitalize;
+      }}
+
+      /* Cards / metrics */
+      .metric {{
+        border: 1px solid #111;
+        border-radius: 12px;
+        padding: 14px;
+        text-align: center;
+        background: rgba(255,255,255,0.6);
+        backdrop-filter: blur(2px);
+      }}
+
+      .brand-title {{
+        font-size: 26px; 
+        text-align: center;
+      }}
+
+      /* Inputs tidy */
+      .stSelectbox div[data-baseweb="select"],
+      .stNumberInput input,
+      .stTextInput input,
+      .stTextArea textarea {{
+        border: 1px solid #111;
+        background: #fff;
+      }}
+
+      /* Tabs accent underline (subtle) */
+      .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {{
+        box-shadow: inset 0 -2px 0 0 {POP};
+      }}
+    </style>
+    """,
     unsafe_allow_html=True,
 )
 
@@ -309,8 +372,17 @@ if "assessment" not in st.session_state:
 with st.sidebar:
     st.markdown(f"<div style='display:flex;justify-content:center;margin-bottom:10px'>{logo_tag(64)}</div>", unsafe_allow_html=True)
     if st.session_state.auth_user:
-        # Make User Guide FIRST after sign-in — now includes a dedicated Versions page
-        page = st.radio("Navigate", ["User Guide", "Inputs", "Workspace", " Versions", "Settings"], index=0, key="nav")
+        # Display labels with Title Case + trailing period, but map back to original page keys
+        nav_labels = ["User Guide.", "Inputs.", "Workspace.", "Versions.", "Settings."]
+        nav_map = {
+            "User Guide.": "User Guide",
+            "Inputs.": "Inputs",
+            "Workspace.": "Workspace",
+            "Versions.": "📁 Versions",  # internal value used later
+            "Settings.": "Settings",
+        }
+        sel = st.radio("Navigate.", nav_labels, index=0, key="nav")
+        page = nav_map[sel]
         st.markdown("<div class='nav-note'>Workspace tabs: Results & Comparison → Final Summary → Report. Versions is now a separate page.</div>", unsafe_allow_html=True)
     else:
         page = "Sign in"
@@ -322,7 +394,8 @@ cl, cm, cr = st.columns([0.18, 0.64, 0.18])
 with cl:
     st.markdown(f"{logo_tag(86)}", unsafe_allow_html=True)
 with cm:
-    st.markdown("<div class='brand-title'>Easy LCA Indicator</div>", unsafe_allow_html=True)
+    # Title Case + trailing period
+    st.markdown("<div class='brand-title'>Easy LCA Indicator.</div>", unsafe_allow_html=True)
 with cr:
     if st.session_state.auth_user:
         initials = _initials(st.session_state.auth_user)
@@ -330,7 +403,7 @@ with cr:
             with st.popover(f"👤 {initials}"):
                 st.write(f"Signed in as **{st.session_state.auth_user}**")
                 st.markdown("---")
-                st.subheader("Account settings")
+                st.subheader("Account Settings.")
                 with st.form("change_pw_form", clear_on_submit=True):
                     cur = st.text_input("Current password", type="password")
                     new = st.text_input("New password", type="password")
@@ -364,7 +437,7 @@ with cr:
 # Sign-in gate
 # -----------------------------
 if not st.session_state.auth_user:
-    st.markdown("### Sign in to continue")
+    st.markdown("### Sign In To Continue.")
     t1, t2 = st.columns([0.55, 0.45])
     with t1:
         st.markdown("Use your TCHAI account email and password.")
@@ -380,11 +453,11 @@ if not st.session_state.auth_user:
             else:
                 st.session_state.auth_user = u
                 # Force nav to "User Guide" immediately after sign-in
-                st.session_state.nav = "User Guide"
+                st.session_state.nav = "User Guide."
                 st.success("Welcome!")
                 _rerun()
     with t2:
-        st.markdown("#### Need changes?")
+        st.markdown("#### Need Changes?")
         st.caption("User creation is disabled. Ask an admin to add a new account.")
     st.stop()
 
@@ -396,7 +469,7 @@ if not st.session_state.auth_user:
 # SETTINGS → Database Manager (PERSISTENT)
 # -----------------------------
 if page == "Settings":
-    st.subheader("Database Manager")
+    st.subheader("Database Manager.")
     st.caption("Upload your Excel ONCE. It becomes the active database until you change it here.")
 
     active = get_active_database_path()
@@ -405,7 +478,7 @@ if page == "Settings":
     else:
         st.warning("No active database set.")
 
-    up = st.file_uploader("Upload Excel (.xlsx) and activate", type=["xlsx"], key="db_upload")
+    up = st.file_uploader("Upload Excel (.xlsx) And Activate.", type=["xlsx"], key="db_upload")
     if up is not None:
         try:
             ts = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -415,7 +488,7 @@ if page == "Settings":
         except Exception as e:
             st.error(f"Upload failed: {e}")
 
-    st.markdown("### Available Databases")
+    st.markdown("### Available Databases.")
     dbs = list_databases()
     if not dbs:
         st.info("No databases found. Upload one above.")
@@ -448,14 +521,14 @@ if page == "Settings":
 # -----------------------------
 if page == "Inputs":
     active_path = get_active_database_path()
-    st.subheader("Database status")
+    st.subheader("Database Status.")
     if active_path:
         st.success(f"Active database: **{active_path.name}**")
     else:
         st.error("No active database found. Go to Settings → Database Manager.")
 
     st.caption("Optional: override for THIS session only")
-    override = st.file_uploader("Session override (.xlsx)", type=["xlsx"], key="override_db")
+    override = st.file_uploader("Session Override (.xlsx).", type=["xlsx"], key="override_db")
 
     # Decide which Excel to load
     if override is not None:
@@ -478,10 +551,10 @@ if page == "Inputs":
 
     c2, c3 = st.columns(2)
     with c2:
-        mat_choice = st.selectbox("Materials sheet", options=xls.sheet_names,
+        mat_choice = st.selectbox("Materials Sheet.", options=xls.sheet_names,
                                   index=xls.sheet_names.index(auto_mat) if auto_mat in xls.sheet_names else 0)
     with c3:
-        proc_choice = st.selectbox("Processes sheet", options=xls.sheet_names,
+        proc_choice = st.selectbox("Processes Sheet.", options=xls.sheet_names,
                                    index=xls.sheet_names.index(auto_proc) if auto_proc in xls.sheet_names else 0)
 
     # Parse selected sheets
@@ -504,15 +577,15 @@ if page == "Inputs":
         st.warning("No processes parsed. Ensure the 'Processes' sheet has columns like Process Type + CO2e + Unit (exact headers), or use aliases such as Process/Step/Operation for the name column.")
 
     # Lifetime + Materials UI
-    st.subheader("Lifetime (weeks)")
+    st.subheader("Lifetime (Weeks).")
     st.session_state.assessment["lifetime_weeks"] = st.number_input(
         "", min_value=1, value=int(st.session_state.assessment.get("lifetime_weeks", 52))
     )
 
-    st.subheader("Materials & processes")
+    st.subheader("Materials & Processes.")
     mats = list(st.session_state.materials.keys())
     st.session_state.assessment["selected_materials"] = st.multiselect(
-        "Select materials", options=mats,
+        "Select Materials.", options=mats,
         default=st.session_state.assessment.get("selected_materials", [])
     )
 
@@ -521,18 +594,18 @@ if page == "Inputs":
         st.stop()
 
     for m in st.session_state.assessment["selected_materials"]:
-        st.markdown(f"### {m}")
+        st.markdown(f"### {m}.")
         masses = st.session_state.assessment.setdefault("material_masses", {})
         procs_data = st.session_state.assessment.setdefault("processing_data", {})
 
         mass_default = float(masses.get(m, 1.0))
-        masses[m] = st.number_input(f"Mass of {m} (kg)", min_value=0.0, value=mass_default, key=f"mass_{m}")
+        masses[m] = st.number_input(f"Mass Of {m} (kg).", min_value=0.0, value=mass_default, key=f"mass_{m}")
 
         props = st.session_state.materials[m]
         st.caption(f"CO₂e/kg: {props['CO₂e (kg)']} · Recycled %: {props['Recycled Content']} · EoL: {props['EoL']}")
 
         steps = procs_data.setdefault(m, [])
-        n = st.number_input(f"How many processing steps for {m}?", min_value=0, max_value=10, value=len(steps), key=f"steps_{m}")
+        n = st.number_input(f"How Many Processing Steps For {m}?", min_value=0, max_value=10, value=len(steps), key=f"steps_{m}")
         if n < len(steps):
             steps[:] = steps[:int(n)]
         else:
@@ -544,12 +617,12 @@ if page == "Inputs":
             current_proc = steps[i]['process'] if steps[i]['process'] in st.session_state.processes else ''
             idx = proc_options.index(current_proc) if current_proc in proc_options else 0
             proc = st.selectbox(
-                f"Process #{i+1}", options=proc_options, index=idx, key=f"proc_{m}_{i}"
+                f"Process #{i+1}.", options=proc_options, index=idx, key=f"proc_{m}_{i}"
             )
             if proc:
                 pr = st.session_state.processes.get(proc, {})
                 amt = st.number_input(
-                    f"Amount for '{proc}' ({pr.get('Unit','')})",
+                    f"Amount For '{proc}' ({pr.get('Unit','')}).",
                     min_value=0.0, value=float(steps[i].get('amount', 1.0)), key=f"amt_{m}_{i}"
                 )
                 steps[i] = {"process": proc, "amount": amt, "co2e_per_unit": pr.get('CO₂e', 0.0), "unit": pr.get('Unit', '')}
@@ -823,32 +896,52 @@ if page == "Workspace":
         st.stop()
 
     R = compute_results()
-    tabs = st.tabs(["Results & Comparison", "Final Summary", "Report"])  # Versions removed here
 
-    # Results & Comparison together
-    with tabs[0]:
+    # Tabs: show pretty labels, keep internal order
+    tab_labels = ["Results & Comparison.", "Final Summary.", "Report."]
+    t0, t1, t2 = st.tabs(tab_labels)
+
+    # Results & Comparison
+    with t0:
         c1, c2, c3 = st.columns(3)
-        c1.metric("Total CO₂ (materials)", f"{R['total_material_co2']:.1f} kg")
-        c2.metric("Total CO₂ (processes)", f"{R['total_process_co2']:.1f} kg")
-        c3.metric("Weighted recycled", f"{R['weighted_recycled']:.1f}%")
+        c1.metric("Total CO₂ (Materials).", f"{R['total_material_co2']:.1f} kg")
+        c2.metric("Total CO₂ (Processes).", f"{R['total_process_co2']:.1f} kg")
+        c3.metric("Weighted Recycled.", f"{R['weighted_recycled']:.1f}%")
 
         df = pd.DataFrame(R['comparison'])
         if df.empty:
             st.info("No data yet.")
         else:
             def style(fig):
-                fig.update_layout(plot_bgcolor="#fff", paper_bgcolor="#fff", font=dict(color="#000", size=14), title_x=0.5, title_font_size=20)
+                fig.update_layout(
+                    plot_bgcolor=BG,
+                    paper_bgcolor=BG,
+                    font=dict(color="#000", size=14),
+                    title_x=0.5,
+                    title_font_size=20
+                )
                 return fig
+
             a, b = st.columns(2)
             with a:
-                fig = px.bar(df, x="Material", y="CO2e per kg", color="Material", title="CO₂e per kg", color_discrete_sequence=PURPLE)
+                fig = px.bar(
+                    df, x="Material", y="CO2e per kg", color="Material",
+                    title="CO₂e Per Kg.", color_discrete_sequence=[POP]
+                )
                 st.plotly_chart(style(fig), use_container_width=True)
             with b:
-                fig = px.bar(df, x="Material", y="Recycled Content (%)", color="Material", title="Recycled Content (%)", color_discrete_sequence=PURPLE)
+                fig = px.bar(
+                    df, x="Material", y="Recycled Content (%)", color="Material",
+                    title="Recycled Content (%).", color_discrete_sequence=[POP]
+                )
                 st.plotly_chart(style(fig), use_container_width=True)
+
             c, d = st.columns(2)
             with c:
-                fig = px.bar(df, x="Material", y="Circularity (mapped)", color="Material", title="Circularity", color_discrete_sequence=PURPLE)
+                fig = px.bar(
+                    df, x="Material", y="Circularity (mapped)", color="Material",
+                    title="Circularity.", color_discrete_sequence=[POP]
+                )
                 fig.update_yaxes(tickmode='array', tickvals=[0,1,2,3], ticktext=['Not Circular','Low','Medium','High'])
                 st.plotly_chart(style(fig), use_container_width=True)
             with d:
@@ -859,16 +952,19 @@ if page == "Workspace":
                 g['Lifetime Category'] = g['Lifetime (years)'].apply(life_cat)
                 MAP = {"Short":1, "Medium":2, "Long":3}
                 g['Lifetime'] = g['Lifetime Category'].map(MAP)
-                fig = px.bar(g, x="Material", y="Lifetime", color="Material", title="Lifetime", color_discrete_sequence=PURPLE)
+                fig = px.bar(
+                    g, x="Material", y="Lifetime", color="Material",
+                    title="Lifetime.", color_discrete_sequence=[POP]
+                )
                 fig.update_yaxes(tickmode='array', tickvals=[1,2,3], ticktext=['Short','Medium','Long'])
                 st.plotly_chart(style(fig), use_container_width=True)
 
     # Final Summary
-    with tabs[1]:
+    with t1:
         m1, m2, m3 = st.columns(3)
-        m1.markdown(f"<div class='metric'><div>Total Impact CO₂e</div><h2>{R['overall_co2']:.1f} kg</h2></div>", unsafe_allow_html=True)
-        m2.markdown(f"<div class='metric'><div>Tree Equivalent / year</div><h2>{R['trees_equiv']:.1f}</h2></div>", unsafe_allow_html=True)
-        m3.markdown(f"<div class='metric'><div>Total Trees</div><h2>{R['total_trees_equiv']:.1f}</h2></div>", unsafe_allow_html=True)
+        m1.markdown(f"<div class='metric'><div>Total Impact CO₂e.</div><h2>{R['overall_co2']:.1f} kg</h2></div>", unsafe_allow_html=True)
+        m2.markdown(f"<div class='metric'><div>Tree Equivalent / Year.</div><h2>{R['trees_equiv']:.1f}</h2></div>", unsafe_allow_html=True)
+        m3.markdown(f"<div class='metric'><div>Total Trees.</div><h2>{R['total_trees_equiv']:.1f}</h2></div>", unsafe_allow_html=True)
         st.markdown(
             "<p style='margin-top:8px; font-size:0.95rem; color:#374151'>"
             "<b>Tree Equivalent</b> is a communication proxy: the estimated number of trees needed to sequester the same CO₂e over your chosen lifetime "
@@ -876,14 +972,14 @@ if page == "Workspace":
             "</p>",
             unsafe_allow_html=True
         )
-        st.markdown("#### End-of-Life Summary")
+        st.markdown("#### End-Of-Life Summary.")
         for k, v in R['eol_summary'].items():
             st.write(f"• **{k}** — {v}")
 
     # Report (Template DOCX preferred, with PDF/DOCX/TXT fallbacks)
-    with tabs[2]:
-        project = st.text_input("Project name", value="Sample Project")
-        notes = st.text_area("Executive notes")
+    with t2:
+        project = st.text_input("Project Name.", value="Sample Project")
+        notes = st.text_area("Executive Notes.")
 
         # Prefer: Attached DOCX template + live data injection
         templ_docx = None
@@ -899,7 +995,7 @@ if page == "Workspace":
         if templ_docx:
             st.success("Using attached DOCX template with live numbers.")
             st.download_button(
-                "⬇️ Download Report (DOCX from template)",
+                "⬇️ Download Report (DOCX From Template).",
                 data=templ_docx,
                 file_name=f"TCHAI_Report_{project.replace(' ','_')}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -924,7 +1020,7 @@ if page == "Workspace":
 
             if pdf_bytes:
                 st.download_button(
-                    "⬇️ Download PDF report (smart-filled)",
+                    "⬇️ Download PDF Report (Smart-Filled).",
                     data=pdf_bytes,
                     file_name=f"TCHAI_Report_{project.replace(' ','_')}.pdf",
                     mime="application/pdf"
@@ -947,7 +1043,7 @@ if page == "Workspace":
                 )
                 if docx_bytes:
                     st.download_button(
-                        "⬇️ Download DOCX report (smart-filled)",
+                        "⬇️ Download DOCX Report (Smart-Filled).",
                         data=docx_bytes,
                         file_name=f"TCHAI_Report_{project.replace(' ','_')}.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -1001,7 +1097,7 @@ if page == "Workspace":
                     plain_txt = "\n".join(lines).encode("utf-8")
 
                     st.download_button(
-                        "⬇️ Download Plain-Text Report",
+                        "⬇️ Download Plain-Text Report.",
                         data=plain_txt,
                         file_name=f"TCHAI_Report_{project.replace(' ','_')}.txt",
                         mime="text/plain"
@@ -1011,7 +1107,7 @@ if page == "Workspace":
 # 📁 VERSIONS (dedicated page)
 # -----------------------------
 if page == "📁 Versions":
-    st.subheader("📁 Version Management")
+    st.subheader("📁 Version Management.")
 
     class VM:
         def __init__(self, storage_dir: str = "lca_versions"):
@@ -1049,12 +1145,12 @@ if page == "📁 Versions":
     if "vm" not in st.session_state: st.session_state.vm = VM()
     vm = st.session_state.vm
 
-    t1, t2, t3 = st.tabs(["Save", "Load", "Manage"])
+    t1, t2, t3 = st.tabs(["Save.", "Load.", "Manage."])
 
     # Save
     with t1:
-        name = st.text_input("Version name")
-        desc = st.text_area("Description (optional)")
+        name = st.text_input("Version Name.")
+        desc = st.text_area("Description (Optional).")
         if st.button("💾 Save"):
             data = {**st.session_state.assessment}
             data.update(compute_results())  # snapshot of current session (inputs + computed)
@@ -1067,7 +1163,7 @@ if page == "📁 Versions":
         if not meta:
             st.info("No versions saved yet.")
         else:
-            sel = st.selectbox("Select version", list(meta.keys()))
+            sel = st.selectbox("Select Version.", list(meta.keys()))
             if st.button("📂 Load"):
                 data, msg = vm.load(sel)
                 if data:
@@ -1083,7 +1179,7 @@ if page == "📁 Versions":
         if not meta:
             st.info("Nothing to manage yet.")
         else:
-            sel = st.selectbox("Select version to delete", list(meta.keys()))
+            sel = st.selectbox("Select Version To Delete.", list(meta.keys()))
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
@@ -1203,7 +1299,7 @@ def _load_bytes(p: Path) -> bytes:
     return p.read_bytes()
 
 if page == "User Guide":
-    st.header("📘 User Guide")
+    st.header("📘 User Guide.")
 
     # Prefer "best" guide; if not, just show the latest we find
     guide = _pick_guide() or _latest_guide()
@@ -1253,7 +1349,7 @@ if page == "User Guide":
             }.get(ext, "application/octet-stream")
 
         st.download_button(
-            "⬇️ Download User Guide",
+            "⬇️ Download User Guide.",
             data=data,
             file_name=guide.name,
             mime=mime,
@@ -1263,4 +1359,3 @@ if page == "User Guide":
 
     except Exception as e:
         st.error(f"Failed to load the guide: {e}")
-
