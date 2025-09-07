@@ -397,10 +397,7 @@ with st.sidebar:
         )
         page = nav_map[sel]
 
-        st.markdown(
-            "<div class='nav-note'>Workspace tabs: Results & Comparison → Final Summary → Report. Versions is now a separate page.</div>",
-            unsafe_allow_html=True
-        )
+    
     else:
         page = "Sign in"
 
@@ -1377,6 +1374,7 @@ if page == "User Guide":
 
     except Exception as e:
         st.error(f"Failed to load the guide: {e}")
+
 
 
 
