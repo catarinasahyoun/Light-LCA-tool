@@ -1011,8 +1011,7 @@ st.markdown("---")
 st.header("📘 User Guide")
 
 guide_candidates = [
-    Path("/mnt/data/LCA-Light Usage Overview - Updated.docx"),
-    Path("assets/guides/LCA-Light Usage Overview - Updated.docx"),
+    Path("/mnt/data/LCA_userguide.docx"),
 ]
 guide_path = next((p for p in guide_candidates if p.exists()), None)
 
@@ -1027,4 +1026,5 @@ if guide_path:
         st.download_button("⬇️ Download User Guide", f, file_name=guide_path.name)
 else:
     st.error("No User Guide file found. Place it in `/mnt/data/` or `assets/guides/`.")
+
 
