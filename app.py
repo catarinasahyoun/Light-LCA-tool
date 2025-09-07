@@ -1299,7 +1299,7 @@ def _load_bytes(p: Path) -> bytes:
     return p.read_bytes()
 
 if page == "User Guide":
-    st.header("📘 User Guide.")
+    st.header("User Guide")
 
     # Prefer "best" guide; if not, just show the latest we find
     guide = _pick_guide() or _latest_guide()
@@ -1349,7 +1349,7 @@ if page == "User Guide":
             }.get(ext, "application/octet-stream")
 
         st.download_button(
-            "⬇️ Download User Guide.",
+            "Download User Guide.",
             data=data,
             file_name=guide.name,
             mime=mime,
@@ -1359,4 +1359,5 @@ if page == "User Guide":
 
     except Exception as e:
         st.error(f"Failed to load the guide: {e}")
+
 
