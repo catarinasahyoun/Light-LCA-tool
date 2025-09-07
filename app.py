@@ -982,9 +982,9 @@ if page == "Workspace":
                     st.success(msg) if ok else st.error(msg)
 
 # ------------------------------------------------------------------
-# USER GUIDE PAGE (first page after sign-in) — uses assets/guides + /mnt/data
+# USER GUIDE PAGE (robust: search, debug, upload fallback)
 # ------------------------------------------------------------------
-import base64, shutil
+import base64, shutil, io
 
 def _embed_pdf(bytes_: bytes, height: int = 760):
     b64 = base64.b64encode(bytes_).decode()
@@ -1003,12 +1003,10 @@ def _read_docx_text(docx_path: Path) -> str:
         import docx
         d = docx.Document(str(docx_path))
         parts = []
-        # paragraphs
         for p in d.paragraphs:
             t = p.text.strip()
             if t:
                 parts.append(t)
-        # simple tables → markdown-ish
         for tbl in d.tables:
             if tbl.rows:
                 header = [c.text.strip() for c in tbl.rows[0].cells]
@@ -1025,63 +1023,122 @@ def _read_docx_text(docx_path: Path) -> str:
 def _load_bytes(p: Path) -> bytes:
     return p.read_bytes()
 
-def _bootstrap_guide():
-    """If a guide exists in /mnt/data but not in assets/guides, copy it once."""
-    src = Path("/mnt/data/LCA_userguide.docx")
-    dest = GUIDES / "LCA_userguide.docx"
-    if src.exists() and not dest.exists():
-        try:
-            shutil.copy2(src, dest)
-        except Exception:
-            pass
+def _safe_write(dest: Path, data: bytes):
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+
+def _bootstrap_copy_candidates():
+    """
+    If a guide exists in /mnt/data or cwd but not in assets/guides, copy it once.
+    """
+    candidates = [
+        Path("/mnt/data/LCA_userguide.docx"),
+        Path("/mnt/data/UserGuide.docx"),
+        BASE / "LCA_userguide.docx",
+        BASE / "UserGuide.docx",
+    ]
+    for src in candidates:
+        if src.exists():
+            dest = GUIDES / src.name
+            if not dest.exists():
+                try:
+                    shutil.copy2(src, dest)
+                except Exception:
+                    pass
 
 def _find_guides() -> list[Path]:
-    """Return available guide files from both assets/guides and /mnt/data."""
-    _bootstrap_guide()
-    locations = [GUIDES, Path("/mnt/data")]
+    """
+    Return available guide files from:
+      1) assets/guides (preferred),
+      2) /mnt/data,
+      3) whole repo (fallback).
+    """
+    _bootstrap_copy_candidates()
     exts = {".docx", ".md", ".pdf"}
     found = []
-    for loc in locations:
-        if loc.exists():
-            for p in sorted(loc.iterdir(), key=lambda x: x.name.lower()):
+
+    # 1) assets/guides
+    if GUIDES.exists():
+        for p in GUIDES.iterdir():
+            if p.is_file() and p.suffix.lower() in exts:
+                found.append(p)
+
+    # 2) /mnt/data
+    mnt = Path("/mnt/data")
+    if mnt.exists():
+        for p in mnt.iterdir():
+            if p.is_file() and p.suffix.lower() in exts:
+                found.append(p)
+
+    # 3) repo-wide fallback (only if nothing found yet)
+    if not found:
+        for p in BASE.rglob("*"):
+            try:
                 if p.is_file() and p.suffix.lower() in exts:
+                    # ignore venv/hidden dirs for speed
+                    if any(seg.startswith(".") for seg in p.parts):
+                        continue
                     found.append(p)
-    # de-duplicate by name (prefer assets/guides copy)
+            except Exception:
+                continue
+
+    # de-duplicate by filename (prefer assets/guides copy)
     uniq, seen = [], set()
+    order_pref = {str(GUIDES): 0, "/mnt/data": 1, str(BASE): 2}
+    found.sort(key=lambda p: (order_pref.get(str(p.parent), 3), p.name.lower()))
     for p in found:
         if p.name not in seen:
             uniq.append(p); seen.add(p.name)
     return uniq
 
+def _debug_paths_panel(guides: list[Path]):
+    with st.expander("🔎 Debug: paths & detected guides", expanded=False):
+        st.code(
+            f"cwd: {Path.cwd()}\n"
+            f"BASE: {BASE}\n"
+            f"ASSETS exists: {ASSETS.exists()}\n"
+            f"GUIDES: {GUIDES} (exists={GUIDES.exists()})\n"
+            f"/mnt/data exists: {Path('/mnt/data').exists()}\n"
+            f"Detected guides:\n  - " + "\n  - ".join(str(g) for g in guides) if guides else
+            f"cwd: {Path.cwd()}\nBASE: {BASE}\nASSETS exists: {ASSETS.exists()}\nGUIDES: {GUIDES} (exists={GUIDES.exists()})\n/mnt/data exists: {Path('/mnt/data').exists()}\nDetected guides: (none)"
+        )
+
 if page == "User Guide":
     st.header("📘 User Guide")
 
     guides = _find_guides()
+    _debug_paths_panel(guides)
+
     if not guides:
-        st.error("No User Guide file found. Place a `.docx`, `.md`, or `.pdf` in `assets/guides/` or `/mnt/data/`.")
-        st.caption("Tip: commit `assets/guides/LCA_userguide.docx` to your repo.")
-    else:
-        sel = st.selectbox("Select a guide", guides, index=0, format_func=lambda p: p.name)
-        st.success(f"Loaded guide: **{sel.name}**")
+        st.error("No User Guide file found. You can upload one below, or place a `.docx`, `.md`, or `.pdf` in `assets/guides/`.")
+        up = st.file_uploader("Upload a guide (.docx, .md, .pdf)", type=["docx","md","pdf"], key="guide_upload")
+        if up is not None:
+            try:
+                dest = GUIDES / up.name
+                _safe_write(dest, up.read())
+                st.success(f"Saved to {dest}. Please click 'Rerun' or change page and come back.")
+            except Exception as e:
+                st.error(f"Upload failed: {e}")
+        st.stop()
 
+    sel = st.selectbox("Select a guide", guides, index=0, format_func=lambda p: p.name)
+    st.success(f"Loaded guide: **{sel.name}**")
+
+    try:
+        data = _load_bytes(sel)
         ext = sel.suffix.lower()
-        try:
-            data = _load_bytes(sel)
 
-            if ext == ".md":
-                st.markdown(data.decode("utf-8"))
+        if ext == ".md":
+            st.markdown(data.decode("utf-8"))
+        elif ext == ".docx":
+            text = _read_docx_text(sel)
+            if text.strip():
+                st.text_area("User Guide", value=text, height=640, label_visibility="collapsed")
+            else:
+                st.warning("Guide found but no text could be extracted. Try downloading it below.")
+        elif ext == ".pdf":
+            _embed_pdf(data, height=760)
 
-            elif ext == ".docx":
-                text = _read_docx_text(sel)
-                if text.strip():
-                    st.text_area("User Guide", value=text, height=640, label_visibility="collapsed")
-                else:
-                    st.warning("Guide found but no text could be extracted. Try downloading it below.")
-
-            elif ext == ".pdf":
-                _embed_pdf(data, height=760)
-
-            st.download_button("⬇️ Download User Guide", data=data, file_name=sel.name)
-
-        except Exception as e:
-            st.error(f"Failed to open guide: {e}")
+        st.download_button("⬇️ Download User Guide", data=data, file_name=sel.name)
+    except Exception as e:
+        st.error(f"Failed to open guide: {e}")
