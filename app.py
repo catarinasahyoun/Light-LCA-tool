@@ -595,7 +595,7 @@ if page == "User Guide":
 # Administrational Settings
 # -----------------------------
 if page in ("Administrational Settings", "Settings"):
-    st.subheader("Database Manager.")
+    st.subheader("Database Manager")
     st.caption("Upload your Excel ONCE. It becomes the active database until you change it here.")
 
     active = get_active_database_path()
@@ -647,7 +647,7 @@ if page in ("Administrational Settings", "Settings"):
 # -----------------------------
 if page in ("Actual Tool", "Inputs"):
     active_path = get_active_database_path()
-    st.subheader("Database Status.")
+    st.subheader("Database Status")
     if active_path:
         st.success(f"Active database: **{active_path.name}**")
     else:
@@ -1090,7 +1090,7 @@ if page in ("Results", "Workspace"):
 # Versions
 # -----------------------------
 if page in ("Version", "📁 Versions"):
-    st.subheader("📁 Version Management")
+    st.subheader(" Version Management")
 
     class VM:
         def __init__(self, storage_dir: str = "lca_versions"):
@@ -1163,6 +1163,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
