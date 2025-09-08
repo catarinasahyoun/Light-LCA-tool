@@ -510,7 +510,7 @@ It can help you make informed, data-based decisions already from the design proc
 ### 1) **Set the lifespan**  
 Tell the tool how long our solution will be in use (in weeks). That’s the baseline for all the math.  
 
-2) **Add materials & processes**  
+### 2) **Add materials & processes**  
 Add each individual material of the design by simply:  
 - a) Pick the material from the database.  
 - b) Enter the total mass used (kg).  
@@ -520,24 +520,24 @@ Add each individual material of the design by simply:
 When you pick a material, the tool shows: CO₂e factor (kg/kg), recycled %, density, and default end-of-life (recycle/incinerate/landfill).  
 If it’s not the right variant (e.g., powder-coated vs raw), choose a better dataset or flag it for update by emailing **sustainability@tchai.nl** (or Jill).  
 
-3) **Let the tool crunch**  
+### 3) **Let the tool crunch**  
 Based on what you entered, LCA-Light calculates:  
 - a) Embodied carbon (CO₂e from materials + processes).  
 - b) Weighted recycled content (how much of your mass is recycled).  
 - c) End-of-life split (recycle / reuse / landfill assumptions).  
 
-4) **Read the summary**  
+### 4) **Read the summary**  
 You’ll get a clean snapshot with:  
 - a) Total recycled content % (of overall mass).  
 - b) Total CO₂e for the concept.  
 - c) Tree-equivalent signal (how much CO₂e the design represents over its lifespan).  
 - d) A material-by-material end-of-life view.  
 
-5) **Compare versions**  
+### 5) **Compare versions**  
 Use the dashboard to compare options (materials, finishes, layouts) on the same indicators (recycled content, carbon).  
 Save different versions, revisit them, or remove them as the concept evolves.  
 
-6) **How to request a change**  
+### 6) **How to request a change**  
 Send an email to **sustainability@tchai.nl** with:  
 - What you need changed (data or code)  
 - Why (project/client need)  
@@ -1164,6 +1164,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
