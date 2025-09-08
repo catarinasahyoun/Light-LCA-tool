@@ -447,8 +447,8 @@ def guidelines_content() -> dict:
 - Plan end-of-life (reuse/recycle routes documented)  
 """,
 
-        "Golden Rules": """
-### 5 Golden Rules
+        "5 Golden Rules": """
+### 
 - Think circular – plan reuse, modularity and end-of-life from day one  
 - Start light – run LCA-Light in briefing/concept to steer choices early  
 - Choose smart materials – prefer recycled/recyclable, FSC/PEFC  
@@ -456,7 +456,7 @@ def guidelines_content() -> dict:
 - Design for disassembly – standard fasteners, clear material separation  
 """,
 
-        "AI and Sustainability": """
+        "": """
 # **Conscious Compute: The Tchai AI Playbook**
 
 ### Using AI, Sustainably 
@@ -503,14 +503,13 @@ Treat AI like a postcard: assume others could read it.
 """,
 
         "Easy LCA Indicator Tool": """
-### Easy LCA Indicator Tool
+###
 LCA-Light is our fast sustainability check. It helps you to get early-stage insights and make comparisons in a project with a focus on materials, layouts, processes, and End of Life.  
 It can help you make informed, data-based decisions already from the design process without having to run a full Life Cycle Assessment.  
 """,
 
         "How does it work": """
-### How does it work?
-
+###
 1) **Set the lifespan**  
 Tell the tool how long our solution will be in use (in weeks). That’s the baseline for all the math.  
 
@@ -549,7 +548,7 @@ Send an email to **sustainability@tchai.nl** with:
 - Any source files or references  
 """,
 
-        "When do you use it": """
+        "": """
 ### Who Can Use It & When?
 | User | Stage of Use | Purpose | Inputs Required |
 |---|---|---|---|
@@ -1168,6 +1167,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
