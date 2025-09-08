@@ -447,7 +447,7 @@ def guidelines_content() -> dict:
 - Plan end-of-life (reuse/recycle routes documented)  
 """,
 
-        "Golden Rules ": """
+        "5 Golden Rules": """
 ### 5 Golden Rules 
 - Think circular – plan reuse, modularity and end-of-life from day one  
 - Start light – run LCA-Light in briefing/concept to steer choices early  
@@ -574,7 +574,7 @@ if page == "User Guide":
 
     tabs = st.tabs([
         "12 Must Haves",
-        "Golden Rules",
+        "5 Golden Rules",
         "AI and Sustainability",
         "Easy LCA Indicator Tool",
         "How does it work",
@@ -582,7 +582,7 @@ if page == "User Guide":
     ])
     tab_names = [
         "12 Must Haves",
-        "Golden Rules",
+        "5 Golden Rules",
         "AI and Sustainability",
         "Easy LCA Indicator Tool",
         "How does it work",
@@ -1165,6 +1165,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
