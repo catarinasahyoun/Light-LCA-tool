@@ -448,7 +448,6 @@ def guidelines_content() -> dict:
 """,
 
         "5 Golden Rules": """
-### 
 - Think circular – plan reuse, modularity and end-of-life from day one  
 - Start light – run LCA-Light in briefing/concept to steer choices early  
 - Choose smart materials – prefer recycled/recyclable, FSC/PEFC  
@@ -1165,6 +1164,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
