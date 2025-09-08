@@ -1090,7 +1090,7 @@ if page in ("Results", "Workspace"):
 # Versions
 # -----------------------------
 if page in ("Version", "📁 Versions"):
-    st.subheader("📁 Version Management.")
+    st.subheader("📁 Version Management")
 
     class VM:
         def __init__(self, storage_dir: str = "lca_versions"):
@@ -1107,28 +1107,28 @@ if page in ("Version", "📁 Versions"):
             fp.write_text(json.dumps(payload))
             m[name] = {"filename": fp.name, "description": desc, "created_at": datetime.now().isoformat(),
                        "materials_count": len(data.get('selected_materials', [])), "total_co2": data.get('overall_co2', 0)}
-            self._save(m); return True, "Saved."
+            self._save(m); return True, "Saved"
         def list(self): return self._load()
         def load(self, name):
             m = self._load()
-            if name not in m: return None, "Not found."
+            if name not in m: return None, "Not found"
             fp = self.dir / m[name]["filename"]
-            if not fp.exists(): return None, "File missing."
+            if not fp.exists(): return None, "File missing"
             try:
-                payload = json.loads(fp.read_text()); return payload.get("assessment_data", {}), "Loaded."
+                payload = json.loads(fp.read_text()); return payload.get("assessment_data", {}), "Loaded"
             except Exception as e:
                 return None, f"Read error: {e}"
         def delete(self, name):
             m = self._load()
-            if name not in m: return False, "Not found."
+            if name not in m: return False, "Not found"
             fp = self.dir / m[name]["filename"]
             if fp.exists(): fp.unlink()
-            del m[name]; self._save(m); return True, "Deleted."
+            del m[name]; self._save(m); return True, "Deleted"
 
     if "vm" not in st.session_state: st.session_state.vm = VM()
     vm = st.session_state.vm
 
-    t1, t2, t3 = st.tabs(["Save.", "Load.", "Manage."])
+    t1, t2, t3 = st.tabs(["Save", "Load.", "Manage."])
 
     with t1:
         name = st.text_input("Version Name.")
@@ -1144,25 +1144,26 @@ if page in ("Version", "📁 Versions"):
         if not meta:
             st.info("No versions saved yet.")
         else:
-            sel = st.selectbox("Select Version.", list(meta.keys()))
+            sel = st.selectbox("Select Version", list(meta.keys()))
             if st.button("📂 Load"):
                 data, msg = vm.load(sel)
                 if data:
                     st.session_state.assessment = data
                     st.success(msg)
-                    st.info("Go to Results to see loaded data.")
+                    st.info("Go to Results to see loaded data")
                 else:
                     st.error(msg)
 
     with t3:
         meta = vm.list()
         if not meta:
-            st.info("Nothing to manage yet.")
+            st.info("Nothing to manage yet")
         else:
-            sel = st.selectbox("Select Version To Delete.", list(meta.keys()))
+            sel = st.selectbox("Select Version To Delete", list(meta.keys()))
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
