@@ -329,7 +329,7 @@ with st.sidebar:
     )
     if st.session_state.auth_user:
         nav_labels = [
-            "Sustainable Guidelines",
+            "User Guide",
             "Actual Tool",
             "Results",
             "Version",
@@ -348,7 +348,7 @@ with st.sidebar:
         )
         page = nav_map[sel]
 
-        if page == "Sustainable Guidelines":
+        if page == "User Guide":
             sub_labels = [
                 "Must Haves",
                 "Golden Rules",
@@ -431,7 +431,7 @@ if not st.session_state.auth_user:
                 st.error("Wrong password.")
             else:
                 st.session_state.auth_user = u
-                st.session_state.nav = "Sustainable Guidelines"
+                st.session_state.nav = "User Guide"
                 st.success("Welcome!")
                 _rerun()
     with t2:
@@ -456,8 +456,8 @@ def guidelines_content() -> dict:
 # -----------------------------
 # PAGE: Sustainable Guidelines
 # -----------------------------
-if page == "Sustainable Guidelines":
-    st.header("Sustainable Guidelines")
+if page == "User Guide":
+    st.header("User Guide")
     content = guidelines_content()
     _sub = st.session_state.get("subguide", "Must Haves")
 
@@ -481,10 +481,6 @@ if page == "Sustainable Guidelines":
         with tabs[i]:
             st.subheader(tn)
             st.write(content.get(tn, ""))
-
-    st.markdown("---")
-    st.subheader(f"Quick view — {_sub}")
-    st.write(content.get(_sub, ""))
 
 # -----------------------------
 # Administrational Settings
