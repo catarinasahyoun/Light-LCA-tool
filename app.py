@@ -459,14 +459,14 @@ def guidelines_content() -> dict:
         "AI and Sustainability": """
 # **Conscious Compute: The Tchai AI Playbook**
 
-### Using AI, Sustainably (and sanely)
+### Using AI, Sustainably 
 Yes, we use AI, even in sustainability work. Elephant in the room: AI isn’t “free.”  
 It burns energy. Think of AI as a super-fast helper who lives in a big factory far away.  
 Every time we ask it to do something, the factory spins up computers and uses energy.  
 
 So we do use AI, but we try to use it like a scalpel, not a sledgehammer — smart, not more.  
 
-### How to use it, in plain terms
+### How to use it
 - When we’re starting from zero, AI is great for a first rough draft, a list of options, or a quick comparison.  
 - When we already know roughly what we want, AI helps tighten text, check a list, or spot gaps.  
 - For images, we keep it tight: few versions as possible, clear prompts, no endless rerolls.  
@@ -479,13 +479,13 @@ We don’t use AI just because it’s shiny. Every extra prompt costs energy and
 - Choosing lighter tools for simple jobs  
 - Reusing what you already generated  
 
-### Data care (really important)
+### Data care 
 Treat AI like a postcard: assume others could read it.  
 - Don’t paste contracts, prices, personal data, or unreleased designs  
 - Use approved tools and privacy settings  
 - If in doubt, don’t upload—ask IT  
 
-### The law bit (in plain English)
+### The law bit 
 - Discoverable like email: chat logs can be requested in legal cases  
 - Third-party issue: client NDAs may forbid sharing with AI vendors  
 - GDPR applies: minimise/anonymise personal data, never upload special-category data  
@@ -1168,6 +1168,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
