@@ -427,7 +427,7 @@ if not st.session_state.auth_user:
 # ---- User Guide content (must be defined before it's used) ----
 def guidelines_content() -> dict:
     sections = {
-        "Must Haves": """
+        "12 Must Haves": """
 ### Materials
 - FSC/PEFC wood; sustainable MDF where feasible  
 - Water-based paints / low-VOC adhesives  
@@ -1168,6 +1168,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
