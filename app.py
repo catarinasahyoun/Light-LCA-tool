@@ -424,12 +424,7 @@ if not st.session_state.auth_user:
         st.caption("User creation is disabled. Ask an admin to add a new account.")
     st.stop()
 
-# -----------------------------
-# Guidelines helper
-# -----------------------------
-
-
-new_func = r'''
+# ---- User Guide content (must be defined before it's used) ----
 def guidelines_content() -> dict:
     sections = {
         "Must Haves": """
@@ -570,7 +565,7 @@ Send an email to **sustainability@tchai.nl** with:
 """
     }
     return sections
-'''
+
 
 # -----------------------------
 # PAGE: Sustainable Guidelines
@@ -1173,6 +1168,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
