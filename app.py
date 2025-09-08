@@ -973,14 +973,14 @@ if page in ("Results", "Workspace"):
                 return fig
             a, b = st.columns(2)
             with a:
-                fig = px.bar(df, x="Material", y="CO2e per kg", color="Material", title="CO₂e Per Kg.", color_discrete_sequence=[POP])
+                fig = px.bar(df, x="Material", y="CO2e per kg", color="Material", title="CO₂e Per Kg", color_discrete_sequence=[POP])
                 st.plotly_chart(style(fig), use_container_width=True)
             with b:
-                fig = px.bar(df, x="Material", y="Recycled Content (%)", color="Material", title="Recycled Content (%).", color_discrete_sequence=[POP])
+                fig = px.bar(df, x="Material", y="Recycled Content (%)", color="Material", title="Recycled Content (%)", color_discrete_sequence=[POP])
                 st.plotly_chart(style(fig), use_container_width=True)
             c, d = st.columns(2)
             with c:
-                fig = px.bar(df, x="Material", y="Circularity (mapped)", color="Material", title="Circularity.", color_discrete_sequence=[POP])
+                fig = px.bar(df, x="Material", y="Circularity (mapped)", color="Material", title="Circularity", color_discrete_sequence=[POP])
                 fig.update_yaxes(tickmode='array', tickvals=[0,1,2,3], ticktext=['Not Circular','Low','Medium','High'])
                 st.plotly_chart(style(fig), use_container_width=True)
             with d:
@@ -1163,6 +1163,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
