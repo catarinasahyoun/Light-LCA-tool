@@ -348,22 +348,7 @@ with st.sidebar:
         )
         page = nav_map[sel]
 
-        if page == "User Guide":
-            sub_labels = [
-                "Must Haves",
-                "Golden Rules",
-                "AI and Sustainability",
-                "Easy LCA Indicator Tool",
-                "How does it work",
-                "When do you use it",
-            ]
-            st.session_state.subguide = st.radio(
-                "Guidelines",
-                sub_labels,
-                key="subguide_radio",
-                index=sub_labels.index(st.session_state.get("subguide", sub_labels[0]))
-                if st.session_state.get("subguide") in sub_labels else 0
-            )
+     
     else:
         page = "Sign in"
 
@@ -1054,3 +1039,4 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
