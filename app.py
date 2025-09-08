@@ -546,7 +546,6 @@ Send an email to **sustainability@tchai.nl** with:
 """,
 
         "When do you use it": """
-### Who Can Use It & When?
 | User | Stage of Use | Purpose | Inputs Required |
 |---|---|---|---|
 | Sales | Briefing / Proposal | Compare design directions for the client pitch | Materials, finishes, size/dimensions |
@@ -1164,6 +1163,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
