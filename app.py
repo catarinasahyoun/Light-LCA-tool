@@ -502,7 +502,7 @@ Treat AI like a postcard: assume others could read it.
 """,
 
         "Easy LCA Indicator Tool": """
-###LCA-Light is our fast sustainability check. It helps you to get early-stage insights and make comparisons in a project with a focus on materials, layouts, processes, and End of Life.  
+LCA-Light is our fast sustainability check. It helps you to get early-stage insights and make comparisons in a project with a focus on materials, layouts, processes, and End of Life.  
 It can help you make informed, data-based decisions already from the design process without having to run a full Life Cycle Assessment.  
 """,
 
@@ -1164,6 +1164,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
