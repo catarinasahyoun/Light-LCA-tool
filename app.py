@@ -428,8 +428,6 @@ if not st.session_state.auth_user:
 # Guidelines helper
 # -----------------------------
 
-p = Path("/mnt/data/app.py")
-code = p.read_text(encoding="utf-8")
 
 new_func = r'''
 def guidelines_content() -> dict:
@@ -574,16 +572,6 @@ Send an email to **sustainability@tchai.nl** with:
     return sections
 '''
 
-# Replace the old guidelines_content function with the new one
-code = re.sub(
-    r'def\s+guidelines_content\(\)\s*->\s*dict:\s*[\s\S]*?return\s+sections\s*\n',
-    new_func + "\n",
-    code,
-    flags=re.MULTILINE
-)
-
-p.write_text(code, encoding="utf-8")
-print("✅ Updated guidelines_content() with detailed Markdown for all sections.")
 # -----------------------------
 # PAGE: Sustainable Guidelines
 # -----------------------------
@@ -1185,5 +1173,6 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
