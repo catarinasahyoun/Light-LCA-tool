@@ -961,9 +961,9 @@ if page in ("Results", "Workspace"):
     t0, t1, t2 = st.tabs(tab_labels)
     with t0:
         c1, c2, c3 = st.columns(3)
-        c1.metric("Total CO₂ (Materials).", f"{R['total_material_co2']:.1f} kg")
-        c2.metric("Total CO₂ (Processes).", f"{R['total_process_co2']:.1f} kg")
-        c3.metric("Weighted Recycled.", f"{R['weighted_recycled']:.1f}%")
+        c1.metric("Total CO₂ (Materials)", f"{R['total_material_co2']:.1f} kg")
+        c2.metric("Total CO₂ (Processes)", f"{R['total_process_co2']:.1f} kg")
+        c3.metric("Recycled Content", f"{R['weighted_recycled']:.1f}%")
         df = pd.DataFrame(R['comparison'])
         if df.empty:
             st.info("No data yet.")
@@ -991,7 +991,7 @@ if page in ("Results", "Workspace"):
                 g['Lifetime Category'] = g['Lifetime (years)'].apply(life_cat)
                 MAP = {"Short":1, "Medium":2, "Long":3}
                 g['Lifetime'] = g['Lifetime Category'].map(MAP)
-                fig = px.bar(g, x="Material", y="Lifetime", color="Material", title="Lifetime.", color_discrete_sequence=[POP])
+                fig = px.bar(g, x="Material", y="Lifetime", color="Material", title="Lifetime", color_discrete_sequence=[POP])
                 fig.update_yaxes(tickmode='array', tickvals=[1,2,3], ticktext=['Short','Medium','Long'])
                 st.plotly_chart(style(fig), use_container_width=True)
     with t1:
@@ -1004,8 +1004,8 @@ if page in ("Results", "Workspace"):
         for k, v in R['eol_summary'].items():
             st.write(f"• **{k}** — {v}")
     with t2:
-        project = st.text_input("Project Name.", value="Sample Project")
-        notes = st.text_area("Executive Notes.")
+        project = st.text_input("Project Name", value="Sample Project")
+        notes = st.text_area("Executive Notes")
         templ_docx = None
         if DOCX_OK:
             templ_docx = build_docx_from_attached_template(
@@ -1163,6 +1163,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
