@@ -381,7 +381,7 @@ with st.sidebar:
             "User Guide": "User Guide",
             "Inputs": "Inputs",
             "Workspace": "Workspace",
-            "Versions": "📁 Versions",  # internal value used later
+            "Versions": " Versions",  # internal value used later
             "Settings": "Settings",
         }
 
@@ -473,7 +473,7 @@ if not st.session_state.auth_user:
                 _rerun()
     with t2:
         st.markdown("#### Need Changes?")
-        st.caption("User creation is disabled. Ask an admin to add a new account.")
+        st.caption("User creation is disabled. Ask an admin to add a new account or to change password.")
     st.stop()
 
 # =============================
@@ -566,10 +566,10 @@ if page == "Inputs":
 
     c2, c3 = st.columns(2)
     with c2:
-        mat_choice = st.selectbox("Materials Sheet.", options=xls.sheet_names,
+        mat_choice = st.selectbox("Materials Sheet", options=xls.sheet_names,
                                   index=xls.sheet_names.index(auto_mat) if auto_mat in xls.sheet_names else 0)
     with c3:
-        proc_choice = st.selectbox("Processes Sheet.", options=xls.sheet_names,
+        proc_choice = st.selectbox("Processes Sheet", options=xls.sheet_names,
                                    index=xls.sheet_names.index(auto_proc) if auto_proc in xls.sheet_names else 0)
 
     # Parse selected sheets
@@ -592,12 +592,12 @@ if page == "Inputs":
         st.warning("No processes parsed. Ensure the 'Processes' sheet has columns like Process Type + CO2e + Unit (exact headers), or use aliases such as Process/Step/Operation for the name column.")
 
     # Lifetime + Materials UI
-    st.subheader("Lifetime (Weeks).")
+    st.subheader("Lifetime (Weeks)")
     st.session_state.assessment["lifetime_weeks"] = st.number_input(
         "", min_value=1, value=int(st.session_state.assessment.get("lifetime_weeks", 52))
     )
 
-    st.subheader("Materials & Processes.")
+    st.subheader("Materials & Processes")
     mats = list(st.session_state.materials.keys())
     st.session_state.assessment["selected_materials"] = st.multiselect(
         "Select Materials.", options=mats,
@@ -1374,6 +1374,7 @@ if page == "User Guide":
 
     except Exception as e:
         st.error(f"Failed to load the guide: {e}")
+
 
 
 
