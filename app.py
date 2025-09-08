@@ -1128,11 +1128,11 @@ if page in ("Version", "📁 Versions"):
     if "vm" not in st.session_state: st.session_state.vm = VM()
     vm = st.session_state.vm
 
-    t1, t2, t3 = st.tabs(["Save", "Load.", "Manage."])
+    t1, t2, t3 = st.tabs(["Save", "Load", "Manage"])
 
     with t1:
-        name = st.text_input("Version Name.")
-        desc = st.text_area("Description (Optional).")
+        name = st.text_input("Version Name")
+        desc = st.text_area("Description (Optional)")
         if st.button("💾 Save"):
             data = {**st.session_state.assessment}
             data.update(compute_results())
@@ -1142,7 +1142,7 @@ if page in ("Version", "📁 Versions"):
     with t2:
         meta = vm.list()
         if not meta:
-            st.info("No versions saved yet.")
+            st.info("No versions saved yet")
         else:
             sel = st.selectbox("Select Version", list(meta.keys()))
             if st.button("📂 Load"):
@@ -1163,6 +1163,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
