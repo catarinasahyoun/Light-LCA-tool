@@ -902,7 +902,7 @@ def build_docx_fallback(project: str, notes: str, summary: dict, selected_materi
     doc.add_paragraph("Use these insights to shape a smarter, more sustainable design.")
     bio = BytesIO(); doc.save(bio); return bio.getvalue()
 
-REPORT_TEMPLATE_PATH = Path("assets/guides/report_template_cleaned.docx)
+REPORT_TEMPLATE_PATH = Path("assets/guides/report_template_cleaned.docx")
 
 
 def find_report_template() -> Path | None:
@@ -1173,6 +1173,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
