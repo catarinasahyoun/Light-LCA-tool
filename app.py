@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -8,6 +7,9 @@ from pathlib import Path
 from typing import Optional, List
 from io import BytesIO
 from mimetypes import guess_type
+from pydantic import BaseModel, Field, ValidationError
+from typing import Dict
+
 
 import zipfile 
 # ================================
@@ -242,21 +244,46 @@ def get_active_database_path() -> Optional[Path]:
 def load_active_excel() -> Optional[pd.ExcelFile]:
     p = get_active_database_path()
     if p and p.exists():
-        try: return pd.ExcelFile(str(p))
+        try:
+            return _open_xls_cached(str(p), p.stat().st_mtime)
         except Exception as e:
             st.error(f"Failed to open Excel: {p.name} — {e}")
             return None
     return None
+    
+@st.cache_data(show_spinner=False)
+def _open_xls_cached(path_str: str, mtime: float) -> pd.ExcelFile:
+    return pd.ExcelFile(path_str)
+
+def _df_sig(df: pd.DataFrame) -> str:
+    return hashlib.sha256(pd.util.hash_pandas_object(df.fillna(''), index=True).values).hexdigest()
+
+@st.cache_data(show_spinner=False)
+def _parse_materials_cached(df: pd.DataFrame, sig: str) -> dict:
+    return parse_materials(df)
+
+@st.cache_data(show_spinner=False)
+def _parse_processes_cached(df: pd.DataFrame, sig: str) -> dict:
+    return parse_processes(df)
 
 # -----------------------------
 # Parsing helpers
 # -----------------------------
+from decimal import Decimal, InvalidOperation
+
 def extract_number(v):
-    try: return float(v)
-    except Exception:
-        s = str(v).replace(',', '.')
-        m = re.search(r"[-+]?\\d*\\.?\\d+", s)
-        return float(m.group()) if m else 0.0
+    try:
+        if isinstance(v, (int, float)):
+            return float(v)
+        s = str(v).strip()
+        s = s.replace('\u2212','-')   # minus sign
+        s = s.replace(',', '.')       # EU decimals
+        m = re.search(r"[-+]?\d*\.?\d+(e[-+]?\d+)?", s, flags=re.I)
+        if not m:
+            return 0.0
+        return float(Decimal(m.group()))
+    except (InvalidOperation, ValueError, TypeError):
+        return 0.0
 
 def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
@@ -336,6 +363,27 @@ if "assessment" not in st.session_state:
         "material_masses": {},
         "processing_data": {}
     }
+class ProcStep(BaseModel):
+    process: str = ""
+    amount: float = 0.0
+    co2e_per_unit: float = 0.0
+    unit: str = ""
+
+class Assessment(BaseModel):
+    lifetime_weeks: int = 52
+    selected_materials: List[str] = Field(default_factory=list)
+    material_masses: Dict[str, float] = Field(default_factory=dict)
+    processing_data: Dict[str, List[ProcStep]] = Field(default_factory=dict)
+
+def _ensure_assessment_model():
+    try:
+        model = Assessment(**st.session_state.get("assessment", {}))
+        st.session_state.assessment = model.model_dump()
+    except ValidationError:
+        st.session_state.assessment = Assessment().model_dump()
+
+# normalize once after defaults
+_ensure_assessment_model()
 
 # -----------------------------
 # Sidebar (logo + nav)
@@ -700,10 +748,13 @@ if page in ("Actual Tool", "Inputs"):
                                    index=xls.sheet_names.index(auto_proc) if auto_proc in xls.sheet_names else 0)
 
     try:
-        mats_df = pd.read_excel(xls, sheet_name=mat_choice)
-        procs_df = pd.read_excel(xls, sheet_name=proc_choice)
-        st.session_state.materials = parse_materials(mats_df)
-        st.session_state.processes = parse_processes(procs_df)
+        with st.spinner("Reading Excel…"):
+    mats_df = pd.read_excel(xls, sheet_name=mat_choice)
+    procs_df = pd.read_excel(xls, sheet_name=proc_choice)
+
+    st.session_state.materials = _parse_materials_cached(mats_df, _df_sig(mats_df))
+    st.session_state.processes = _parse_processes_cached(procs_df, _df_sig(procs_df))
+
     except Exception as e:
         st.error(f"Could not read the selected sheets: {e}")
         st.stop()
@@ -766,6 +817,10 @@ if page in ("Actual Tool", "Inputs"):
                     min_value=0.0, value=float(steps[i].get('amount', 1.0)), key=f"amt_{m}_{i}"
                 )
                 steps[i] = {"process": proc, "amount": amt, "co2e_per_unit": pr.get('CO₂e', 0.0), "unit": pr.get('Unit', '')}
+                
+# normalize structures after user inputs
+_ensure_assessment_model()
+
 
 # -----------------------------
 # Compute results
@@ -1189,6 +1244,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
