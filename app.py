@@ -297,8 +297,9 @@ def get_active_database_path() -> Optional[Path]:
 # -----------------------------
 # Caching helpers (step 5)
 # -----------------------------
-@st.cache_data(show_spinner=False)
+@st.cache_resource(show_spinner=False)  # <-- resources can be non-picklable
 def _open_xls_cached(path_str: str, mtime: float) -> pd.ExcelFile:
+    # mtime stays as an argument to invalidate cache when the file changes
     return pd.ExcelFile(path_str)
 
 def load_active_excel() -> Optional[pd.ExcelFile]:
@@ -1423,5 +1424,6 @@ if page in (t("nav.versions","Version"), "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
