@@ -208,16 +208,16 @@ def set_active_database(path: Path):
     st.success(f"Activated database: {path.name}")
     _rerun()
 
-def get_active_database_path() -> Optional[Path]:
+def get_active_database_) -> Optional[Path]:
     if ACTIVE_DB_FILE.exists():
         try:
             data = json.loads(ACTIVE_DB_FILE.read_text())
-            p = Path(data.get("path", ""))
+            p = data.get("path", ""))
             if p.exists(): return p
         except Exception: pass
     dbs = list_databases()
     if dbs: return dbs[0]
-    for candidate in [ASSETS / "Refined database.xlsx", Path("Refined database.xlsx"), Path("database.xlsx")]:
+    for candidate in [ASSETS / "Refined database.xlsx", "Refined database.xlsx"), "database.xlsx")]:
         if candidate.exists(): return candidate
     return None
 
@@ -889,16 +889,14 @@ def build_docx_fallback(project: str, notes: str, summary: dict, selected_materi
     doc.add_paragraph("Use these insights to shape a smarter, more sustainable design.")
     bio = BytesIO(); doc.save(bio); return bio.getvalue()
 
-REPORT_TEMPLATE_CANDIDATES = [
-    GUIDES / "Text_Report_Easy_LCA_Tool.docx",
-    Path("/mnt/data/Text_Report_Easy_LCA_Tool.docx"),
-]
+REPORT_TEMPLATE_PATH = Path(__file__).resolve().parent / "assets" / "guides" / "Text_Report_Easy_LCA_Tool.docx"
 
 
-def find_report_template() -> Optional[Path]:
-    for pth in REPORT_TEMPLATE_CANDIDATES:
-        if pth.exists() and pth.is_file(): return pth
+def find_report_template() -> Path | None:
+    if REPORT_TEMPLATE_PATH.exists() and REPORT_TEMPLATE_PATH.is_file():
+        return REPORT_TEMPLATE_PATH
     return None
+
 
 def _replace_text_in_docx(doc, mapping: dict):
     for para in doc.paragraphs:
@@ -1162,6 +1160,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
