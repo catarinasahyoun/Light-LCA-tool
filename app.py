@@ -1065,50 +1065,51 @@ def build_pdf_from_template(project: str, notes: str, summary: dict, selected_ma
 
 # ---------- DOCX helpers (step 16) ----------
 def _replace_text_in_docx(doc, mapping: dict):
-    def replace_in_para(para):
-        full_text = "".join(run.text for run in para.runs)
-        changed = False
+    def apply_map(text: str) -> str:
         for k, v in mapping.items():
-            if k in full_text:
-                full_text = full_text.replace(k, v)
-                changed = True
-        if changed:
-            # clear runs and rebuild one run with merged text
-            for _ in range(len(para.runs)):
-                r = para.runs[0]
-                r.text = ""
-                try:
-                    r.clear()
-                except Exception:
-                    pass
-            try:
-                para.clear()
-            except Exception:
-                pass
-            para.add_run(full_text)
+            text = text.replace(k, v)
+        return text
 
-    # paragraphs
-    for para in doc.paragraphs:
-        replace_in_para(para)
-    # tables
+    # Replace in body paragraphs
+    for p in doc.paragraphs:
+        new = apply_map(p.text)
+        if new != p.text:
+            p.text = new  # safe: python-docx rebuilds runs
+
+    # Replace inside table cells
     for tbl in doc.tables:
         for row in tbl.rows:
             for cell in row.cells:
-                for para in cell.paragraphs:
-                    replace_in_para(para)
+                for p in cell.paragraphs:
+                    new = apply_map(p.text)
+                    if new != p.text:
+                        p.text = new
 
 def _materials_table_block(doc, rows: list):
     doc.add_heading("Material Comparison Overview", level=2)
-    headers = ["Material", "CO₂e per Unit (kg CO₂e)", "Avg. Recycled Content", "Circularity", "End-of-Life", "Tree Equivalent*"]
-    table = doc.add_table(rows=1, cols=len(headers))
+
+    headers = ["Material", "CO₂e per Unit (kg CO₂e)", "Avg. Recycled Content",
+               "Circularity", "End-of-Life", "Tree Equivalent*"]
+
+    # Use a built-in table style for better compatibility
+    try:
+        table = doc.add_table(rows=1, cols=len(headers), style="Table Grid")
+    except Exception:
+        table = doc.add_table(rows=1, cols=len(headers))  # fallback
+
     hdr = table.rows[0].cells
     for i, h in enumerate(headers):
         hdr[i].text = h
+
     for r in rows:
         c = table.add_row().cells
         for i, v in enumerate(r):
             c[i].text = str(v)
-    doc.add_paragraph("*Estimated number of trees required to sequester the CO₂e emissions from one unit over the selected years.")
+
+    doc.add_paragraph(
+        "*Estimated number of trees required to sequester the CO₂e emissions from one unit "
+        "over the selected years."
+    )
 
 TEMPLATE_CANDIDATES = [
     Path("/mnt/data/report_template_cleaned.docx"),
@@ -1529,6 +1530,7 @@ if page in (t("nav.versions","Version"), "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
