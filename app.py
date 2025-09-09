@@ -212,14 +212,27 @@ def get_active_database() -> Optional[Path]:
     if ACTIVE_DB_FILE.exists():
         try:
             data = json.loads(ACTIVE_DB_FILE.read_text())
-            p = data.get("path", "")
-            if p.exists(): return p
-        except Exception: pass
+            p = Path(data.get("path", ""))
+            if p.exists():
+                return p
+        except Exception:
+            pass
+
     dbs = list_databases()
-    if dbs: return dbs[0]
-    for candidate in [ASSETS / "Refined database.xlsx", "Refined database.xlsx"), "database.xlsx")]:
-        if candidate.exists(): return candidate
+    if dbs:
+        return dbs[0]
+
+    # Fallback candidates if no active DB found
+    for candidate in [
+        ASSETS / "Refined database.xlsx",
+        Path("Refined database.xlsx"),
+        Path("database.xlsx"),
+    ]:
+        if candidate.exists():
+            return candidate
+
     return None
+
 
 def load_active_excel() -> Optional[pd.ExcelFile]:
     p = get_active_database_path()
@@ -1160,6 +1173,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
