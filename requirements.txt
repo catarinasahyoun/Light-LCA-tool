@@ -1,7 +1,7 @@
-streamlit
-pandas
-plotly
-python-docx
-reportlab
-mammoth
-openpyxl
+streamlit==1.37.*
+pandas==2.2.*
+plotly==5.23.*
+openpyxl==3.1.*
+reportlab==4.2.*        # for PDF export
+python-docx==1.1.*      # for DOCX export
+pydantic==2.8.*         # session schema
