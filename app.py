@@ -114,7 +114,7 @@ def logo_tag(height=86):
 # i18n (step 13)
 # -----------------------------
 LANG_FILE_DIR = ASSETS / "i18n"; ensure_dir(LANG_FILE_DIR)
-if "lang" not in st.session_state: st.session_state.lang = "en"
+st.session_state.lang = "en"  
 
 def t(key: str, default: Optional[str]=None) -> str:
     path = LANG_FILE_DIR / f"{st.session_state.lang}.json"
@@ -274,10 +274,16 @@ def list_databases() -> List[Path]:
 
 def set_active_database(path: Path):
     ACTIVE_DB_FILE.write_text(json.dumps({"path": str(path)}))
+    st.session_state.active_db_path = str(path)   # update session immediately
     st.success(f"Activated database: {path.name}")
-    _rerun()
 
 def get_active_database_path() -> Optional[Path]:
+    # Prefer session value (set when you activate in this run)
+    sess_path = Path(st.session_state.get("active_db_path", "")) if st.session_state.get("active_db_path") else None
+    if sess_path and sess_path.exists():
+        return sess_path
+
+    # Then fall back to the persisted json
     if ACTIVE_DB_FILE.exists():
         try:
             data = json.loads(ACTIVE_DB_FILE.read_text())
@@ -286,9 +292,12 @@ def get_active_database_path() -> Optional[Path]:
                 return p
         except Exception:
             pass
+
+    # Otherwise default to newest DB or sample candidates
     dbs = list_databases()
     if dbs:
         return dbs[0]
+
     for candidate in [ASSETS / "Refined database.xlsx", Path("Refined database.xlsx"), Path("database.xlsx")]:
         if candidate.exists():
             return candidate
@@ -460,7 +469,6 @@ with st.sidebar:
         f"<div style='display:flex;justify-content:center;margin-bottom:10px'>{logo_tag(64)}</div>",
         unsafe_allow_html=True
     )
-    st.selectbox("Language", options=["en","nl"], index=["en","nl"].index(st.session_state.lang) if st.session_state.lang in ["en","nl"] else 0, key="lang")
 
     if st.session_state.auth_user:
         nav_labels = [
@@ -729,51 +737,36 @@ if page in (t("nav.settings","Administrational Settings"), "Settings"):
     else:
         st.warning("No active database set.")
 
+    with st.form("db_upload_form", clear_on_submit=True):
     up = st.file_uploader("Upload Excel (.xlsx) And Activate.", type=["xlsx"], key="db_upload")
-    if up is not None:
+    submitted = st.form_submit_button("Upload & Activate")
+
+if submitted:
+    if up is None:
+        st.warning("Please choose a .xlsx file first.")
+    else:
         try:
             ts = datetime.now().strftime("%Y%m%d-%H%M%S")
             dest = DB_ROOT / f"database_{ts}.xlsx"
-            data = up.read()
+            data = up.getvalue()  # use .getvalue() inside forms
             # quick ZIP magic check for XLSX integrity
+            import io
             try:
-                import io
-                with zipfile.ZipFile(io.BytesIO(data)) as z: z.testzip()
+                with zipfile.ZipFile(io.BytesIO(data)) as z:
+                    z.testzip()
             except Exception as e:
                 raise ValueError("Uploaded file is not a valid .xlsx") from e
+
             dest.write_bytes(data)
-            set_active_database(dest)
+            set_active_database(dest)  # no rerun; session updated
+
+            # Update the local 'active' variable below so the page reflects right away
+            active = dest
+            st.success(f"Saved and activated: {dest.name}")
         except Exception as e:
             logger.exception("Upload failed")
             st.error(f"Upload failed: {e}")
 
-    st.markdown("### Available Databases.")
-    dbs = list_databases()
-    if not dbs:
-        st.info("No databases found. Upload one above.")
-    else:
-        for pth in dbs:
-            cols = st.columns([0.6,0.2,0.2])
-            with cols[0]:
-                st.write(f"**{pth.name}**  ")
-                st.caption(f"{datetime.fromtimestamp(pth.stat().st_mtime).strftime('%Y-%m-%d %H:%M')}")
-            with cols[1]:
-                if active and pth.exists() and active and pth.resolve() == active.resolve():
-                    st.success("Active")
-                else:
-                    if st.button("Activate", key=f"act_{pth.name}"):
-                        set_active_database(pth)
-            with cols[2]:
-                if active and pth.exists() and active and pth.resolve() == active.resolve():
-                    st.caption("(can't delete active)")
-                else:
-                    if st.button("🗑️ Delete", key=f"rm_{pth.name}"):
-                        try:
-                            pth.unlink(missing_ok=True)
-                            st.success("Deleted.")
-                            _rerun()
-                        except Exception as e:
-                            st.error(f"Delete failed: {e}")
 
 # -----------------------------
 # Actual Tool (Inputs)
@@ -1424,6 +1417,7 @@ if page in (t("nav.versions","Version"), "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
