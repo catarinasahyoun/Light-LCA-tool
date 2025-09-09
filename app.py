@@ -315,12 +315,12 @@ def load_active_excel() -> Optional[pd.ExcelFile]:
     p = get_active_database_path()
     if p and p.exists():
         try:
-            return _open_xls_cached(str(p), p.stat().st_mtime)
+            return pd.ExcelFile(str(p))
         except Exception as e:
-            logger.exception("Active Excel open failed")
             st.error(f"Failed to open Excel: {p.name} — {e}")
             return None
     return None
+
 
 @st.cache_data(show_spinner=False)
 def _df_sig(df: pd.DataFrame) -> str:
@@ -880,20 +880,18 @@ if page in (t("nav.tool","Actual Tool"), "Inputs"):
         proc_choice = st.selectbox("Processes Sheet.", options=xls.sheet_names,
                                    index=xls.sheet_names.index(auto_proc) if auto_proc in xls.sheet_names else 0)
 
-    with st.status("Parsing selected sheets…", expanded=False) as status:
-        try:
-            mats_df = pd.read_excel(xls, sheet_name=mat_choice)
-            procs_df = pd.read_excel(xls, sheet_name=proc_choice)
-            st.session_state.materials = _parse_materials_cached(mats_df, _df_sig(mats_df))
-            st.session_state.processes = _parse_processes_cached(procs_df, _df_sig(procs_df))
-            status.update(label="Parsing complete ✅", state="complete")
-        except Exception as e:
-            status.update(label=f"Parsing failed: {e}", state="error")
-            st.stop()
+    try:
+        mats_df = pd.read_excel(xls, sheet_name=mat_choice)
+        procs_df = pd.read_excel(xls, sheet_name=proc_choice)
+        st.session_state.materials = parse_materials(mats_df)
+        st.session_state.processes = parse_processes(procs_df)
+    except Exception as e:
+        logger.exception("Read/parse failed")
+        st.error(f"Could not read the selected sheets: {e}")
+        st.stop()
 
     parsed_m = len(st.session_state.materials or {})
     parsed_p = len(st.session_state.processes or {})
-    st.info(f"Parsed **{parsed_m}** materials and **{parsed_p}** processes.")
     if parsed_m == 0:
         st.warning("No materials parsed. Check your columns: Material name/material/name + CO2e + (optional) Recycled/EoL/Lifetime/Circularity.")
         st.stop()
@@ -1489,6 +1487,7 @@ if page in (t("nav.versions","Version"), "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
