@@ -212,7 +212,7 @@ def get_active_database() -> Optional[Path]:
     if ACTIVE_DB_FILE.exists():
         try:
             data = json.loads(ACTIVE_DB_FILE.read_text())
-            p = data.get("path", ""))
+            p = data.get("path", "")
             if p.exists(): return p
         except Exception: pass
     dbs = list_databases()
@@ -1160,6 +1160,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
