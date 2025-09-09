@@ -738,8 +738,8 @@ if page in (t("nav.settings","Administrational Settings"), "Settings"):
         st.warning("No active database set.")
 
     with st.form("db_upload_form", clear_on_submit=True):
-    up = st.file_uploader("Upload Excel (.xlsx) And Activate.", type=["xlsx"], key="db_upload")
-    submitted = st.form_submit_button("Upload & Activate")
+        up = st.file_uploader("Upload Excel (.xlsx) And Activate.", type=["xlsx"], key="db_upload")
+        submitted = st.form_submit_button("Upload & Activate")
 
 if submitted:
     if up is None:
@@ -1417,6 +1417,7 @@ if page in (t("nav.versions","Version"), "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
