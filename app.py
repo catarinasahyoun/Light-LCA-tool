@@ -357,15 +357,36 @@ def extract_number(v):
         return 0.0
 
 def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
+    """Return a copy with flattened, aggressively normalized headers."""
+    # Flatten MultiIndex headers if present
+    if isinstance(df.columns, pd.MultiIndex):
+        flat = []
+        for tpl in df.columns:
+            vals = [str(x) for x in tpl if x is not None and str(x).strip() != ""]
+            flat.append(" ".join(vals))
+        df = df.copy()
+        df.columns = flat
+    else:
+        df = df.copy()
+
     def _canon(col: str) -> str:
         c = str(col)
-        c = c.replace("co₂","co2").replace("₂","2")
+        # unify common symbols/variants
+        c = c.replace("CO₂", "CO2").replace("co₂", "co2").replace("₂", "2")
+        c = c.replace("CO2-e", "CO2e").replace("CO2 eq", "CO2e").replace("CO2-e", "CO2e").replace("CO2e", "CO2e")
+        c = c.replace("GWP", "CO2e").replace("gwp", "CO2e")
+        # lower, collapse spaces
         c = re.sub(r"\s+", " ", c, flags=re.I).strip().lower()
-        c = re.sub(r"\(.*?\)", "", c)  # remove unit hints
+        # remove unit parentheses / brackets
+        c = re.sub(r"[\(\[\{].*?[\)\]\}]", "", c)
+        # remove stray punctuation
+        c = re.sub(r"[^\w\s/+-]", " ", c)
+        c = re.sub(r"\s+", " ", c).strip()
         return c
+
     df.columns = [_canon(c) for c in df.columns]
     return df
+
 
 def _find_sheet(xls: pd.ExcelFile, target: str) -> Optional[str]:
     names = xls.sheet_names
@@ -379,23 +400,74 @@ def _find_sheet(xls: pd.ExcelFile, target: str) -> Optional[str]:
     return None
 
 def parse_materials(df_raw: pd.DataFrame) -> dict:
-    if df_raw is None or df_raw.empty: return {}
+    """Parse materials with robust aliasing and a heuristic fallback."""
+    if df_raw is None or df_raw.empty:
+        return {}
     df = _normalize_cols(df_raw)
+
+    # Try to find best columns by alias
     def pick(aliases):
         for a in aliases:
-            if a in df.columns: return a
+            if a in df.columns:
+                return a
         return None
-    col_name = pick(["material name","material","name","material_name"])
-    col_co2  = pick(["co2e per kg","co2e/kg","co2e","co2 per kg","co2","emission factor","co2e factor","co2 factor"])
-    col_rc   = pick(["recycled content","recycled content %","recycled","recycled %","recycle %","recycled_pct"])
-    col_eol  = pick(["eol","end of life","end-of-life"])
-    col_life = pick(["lifetime","life","lifespan","lifetime years"])
-    col_circ = pick(["circularity","circ","circularity level"])
-    if not col_name or not col_co2: return {}
+
+    name_aliases = [
+        "material name", "material", "name", "material_name",
+        "material description", "material/description", "description"
+    ]
+    co2_aliases = [
+        # direct phrases
+        "co2e per kg", "co2e/kg", "co2e", "co2 per kg", "co2", "co2/kg",
+        # emission factor wording
+        "emission factor", "co2e factor", "co2 factor", "emission factor kg", "emission", "factor",
+        # common dataset terms
+        "ghg", "ghg factor", "global warming potential", "co2 eq per kg", "co2eq per kg",
+        "kgco2e per kg", "kg co2e/kg", "kgco2/kg", "kg co2/kg"
+    ]
+    rc_aliases = [
+        "recycled content", "recycled content %", "recycled", "recycled %", "recycle %", "recycled_pct",
+        "recycled percent", "recycled (%)"
+    ]
+    eol_aliases = ["eol", "end of life", "end-of-life", "end of-life", "endoflife", "eol default"]
+    life_aliases = ["lifetime", "life", "lifespan", "lifetime years", "lifetime (years)"]
+    circ_aliases = ["circularity", "circ", "circularity level"]
+
+    col_name = pick(name_aliases)
+    col_co2  = pick(co2_aliases)
+    col_rc   = pick(rc_aliases)
+    col_eol  = pick(eol_aliases)
+    col_life = pick(life_aliases)
+    col_circ = pick(circ_aliases)
+
+    # Heuristic fallback if CO2 column not found:
+    if not col_co2:
+        # choose first column whose header contains 'co2' or 'gwp' or 'emission'
+        for c in df.columns:
+            if any(key in c for key in ["co2", "gwp", "emission"]):
+                col_co2 = c
+                break
+
+    # Heuristic fallback if NAME column not found:
+    if not col_name:
+        # pick first non-numeric-looking column
+        for c in df.columns:
+            # skip obvious numeric columns
+            if any(key in c for key in ["co2", "gwp", "emission", "kg", "factor", "per"]):
+                continue
+            # if dtype looks object-ish, likely names
+            if df[c].dtype == object:
+                col_name = c
+                break
+
+    if not col_name or not col_co2:
+        return {}
+
     out = {}
     for _, r in df.iterrows():
         name = (str(r[col_name]).strip() if pd.notna(r[col_name]) else "")
-        if not name: continue
+        if not name:
+            continue
         out[name] = {
             "CO₂e (kg)": extract_number(r[col_co2]) if pd.notna(r[col_co2]) else 0.0,
             "Recycled Content": extract_number(r[col_rc]) if col_rc and pd.notna(r.get(col_rc, None)) else 0.0,
@@ -1417,6 +1489,7 @@ if page in (t("nav.versions","Version"), "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
