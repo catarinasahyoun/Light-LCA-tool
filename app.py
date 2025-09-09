@@ -207,8 +207,8 @@ def set_active_database(path: Path):
     ACTIVE_DB_FILE.write_text(json.dumps({"path": str(path)}))
     st.success(f"Activated database: {path.name}")
     _rerun()
-
-def get_active_database_) -> Optional[Path]:
+    
+def get_active_database() -> Optional[Path]:
     if ACTIVE_DB_FILE.exists():
         try:
             data = json.loads(ACTIVE_DB_FILE.read_text())
@@ -1160,6 +1160,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
