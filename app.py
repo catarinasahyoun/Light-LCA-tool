@@ -42,7 +42,7 @@ def ensure_dir(p: Path):
     p.mkdir(parents=True, exist_ok=True)
 
 APP_DIR = Path(__file__).resolve().parent  # <— key change
-ASSETS  = APP_DIR / "assets";      ensure_dir(ASSETS)
+ASSETS  = ASSETS / "assets";      ensure_dir(ASSETS)
 DB_ROOT = ASSETS / "databases";    ensure_dir(DB_ROOT)
 GUIDES  = ASSETS / "guides";       ensure_dir(GUIDES)
 USERS_FILE     = ASSETS / "users.json"
@@ -1198,6 +1198,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
