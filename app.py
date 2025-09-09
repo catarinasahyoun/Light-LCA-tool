@@ -9,6 +9,7 @@ from typing import Optional, List
 from io import BytesIO
 from mimetypes import guess_type
 
+import zipfile 
 # ================================
 # TCHAI — Easy LCA Indicator (v4)
 # -------------------------------
@@ -29,20 +30,24 @@ st.set_page_config(
 )
 
 # -----------------------------
-# Safe dirs
+# Safe dirs (resolve relative to this file)
 # -----------------------------
+from pathlib import Path
+from datetime import datetime
+
 def ensure_dir(p: Path):
     if p.exists() and not p.is_dir():
         backup = p.with_name(f"{p.name}_conflict_{datetime.now().strftime('%Y%m%d%H%M%S')}")
         p.rename(backup)
     p.mkdir(parents=True, exist_ok=True)
 
-BASE = Path.cwd()
-ASSETS = BASE / "assets"; ensure_dir(ASSETS)
-DB_ROOT = ASSETS / "databases"; ensure_dir(DB_ROOT)
-GUIDES = ASSETS / "guides"; ensure_dir(GUIDES)
-USERS_FILE = ASSETS / "users.json"
+APP_DIR = Path(__file__).resolve().parent  # <— key change
+ASSETS  = APP_DIR / "assets";      ensure_dir(ASSETS)
+DB_ROOT = ASSETS / "databases";    ensure_dir(DB_ROOT)
+GUIDES  = ASSETS / "guides";       ensure_dir(GUIDES)
+USERS_FILE     = ASSETS / "users.json"
 ACTIVE_DB_FILE = DB_ROOT / "active.json"  # stores {"path": "...xlsx"}
+
 
 # -----------------------------
 # Optional PDF/DOCX backends
@@ -902,7 +907,27 @@ def build_docx_fallback(project: str, notes: str, summary: dict, selected_materi
     doc.add_paragraph("Use these insights to shape a smarter, more sustainable design.")
     bio = BytesIO(); doc.save(bio); return bio.getvalue()
 
-REPORT_TEMPLATE_PATH = Path("assets/guides/report_template_cleaned.docx")
+REPORT_TEMPLATE_PATH = GUIDES / "report_template_cleaned.docx"
+
+def find_report_template() -> Optional[Path]:
+    p = REPORT_TEMPLATE_PATH
+    try:
+        if p.exists() and p.is_file() and p.suffix.lower() == ".docx" and p.stat().st_size > 0:
+            # .docx is a ZIP; this fails if corrupted/not a real docx
+            with zipfile.ZipFile(p, "r") as z:
+                z.testzip()
+            return p
+    except zipfile.BadZipFile:
+        return None
+    return None
+
+tpl = find_report_template()
+if not tpl:
+    st.error("No valid DOCX template at assets/guides/report_template_cleaned.docx. "
+             "Make sure it’s committed (exact name, case sensitive) and not corrupted.")
+    st.stop()
+st.caption(f"Using report template: **{tpl}** (size: {tpl.stat().st_size} bytes)")
+
 
 
 def find_report_template() -> Path | None:
@@ -1173,6 +1198,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
