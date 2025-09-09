@@ -984,7 +984,7 @@ def build_pdf_from_template(project: str, notes: str, summary: dict, selected_ma
     story += [table, Spacer(1, 6)]
     story += [Paragraph("*Estimated number of trees required to sequester the CO₂e emissions from one unit over the selected years.", P)]
     story += [Spacer(1, 6), Paragraph("End-of-Life Summary", H2)]
-    if summary["eol_summary"]:
+
     if summary["eol_summary"]:
         bullets = "".join([f"• <b>{k}</b>: {v}<br/>" for k, v in summary["eol_summary"].items()])
         story += [Paragraph(bullets, P)]
