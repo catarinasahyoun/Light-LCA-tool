@@ -1110,28 +1110,57 @@ def _materials_table_block(doc, rows: list):
             c[i].text = str(v)
     doc.add_paragraph("*Estimated number of trees required to sequester the CO₂e emissions from one unit over the selected years.")
 
-# Prefer the freshly uploaded template; fall back to assets/guides if needed
 TEMPLATE_CANDIDATES = [
     Path("/mnt/data/report_template_cleaned.docx"),
     GUIDES / "report_template_cleaned.docx",
-    ASSETS / "guides" / "report_template_cleaned.docx",  # redundant alias
+    ASSETS / "guides" / "report_template_cleaned.docx",
 ]
 
-
 def find_report_template() -> Optional[Path]:
+    # 1) check preferred candidates
     for p in TEMPLATE_CANDIDATES:
         try:
-            if p.exists() and p.is_file() and p.suffix.lower() == ".docx" and p.stat().st_size > 0:
-                # Validate .docx container
-                with zipfile.ZipFile(p, "r") as z:
-                    z.testzip()
-                return p
-        except zipfile.BadZipFile:
-            continue
+            if p.exists() and p.is_file() and p.stat().st_size > 0 and p.suffix.lower() == ".docx":
+                # validate by trying to open with python-docx (safer than testzip on some files)
+                try:
+                    if DOCX_OK:
+                        _ = Document(str(p))
+                    return p
+                except Exception:
+                    # fall back to a zip check
+                    try:
+                        with zipfile.ZipFile(p, "r") as z:
+                            z.testzip()
+                        return p
+                    except Exception:
+                        logger.exception(f"Template failed validation: {p}")
+                        continue
         except Exception:
             logger.exception(f"Template check failed for {p}")
             continue
+
+    # 2) fuzzy search in assets/guides (case-insensitive contains "report" & "template")
+    try:
+        for p in GUIDES.glob("*.docx"):
+            name = p.name.lower()
+            if ("report" in name and "template" in name) or ("report_template" in name):
+                try:
+                    if DOCX_OK:
+                        _ = Document(str(p))
+                    return p
+                except Exception:
+                    try:
+                        with zipfile.ZipFile(p, "r") as z:
+                            z.testzip()
+                        return p
+                    except Exception:
+                        logger.exception(f"Fuzzy template failed validation: {p}")
+                        continue
+    except Exception:
+        logger.exception("Fuzzy GUIDES glob failed")
+
     return None
+
 
 def build_docx_from_attached_template(project: str, notes: str, R: dict,
                                       selected_materials: List[str], materials_dict: dict, material_masses: dict) -> Optional[bytes]:
@@ -1500,6 +1529,7 @@ if page in (t("nav.versions","Version"), "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
