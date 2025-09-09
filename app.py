@@ -1110,21 +1110,27 @@ def _materials_table_block(doc, rows: list):
             c[i].text = str(v)
     doc.add_paragraph("*Estimated number of trees required to sequester the CO₂e emissions from one unit over the selected years.")
 
-REPORT_TEMPLATE_PATH = GUIDES / "report_template_cleaned.docx"
+# Prefer the freshly uploaded template; fall back to assets/guides if needed
+TEMPLATE_CANDIDATES = [
+    Path("/mnt/data/report_template_cleaned.docx"),
+    GUIDES / "report_template_cleaned.docx",
+    ASSETS / "guides" / "report_template_cleaned.docx",  # redundant alias
+]
+
 
 def find_report_template() -> Optional[Path]:
-    p = REPORT_TEMPLATE_PATH
-    try:
-        if p.exists() and p.is_file() and p.suffix.lower() == ".docx" and p.stat().st_size > 0:
-            # .docx is a ZIP container — test integrity
-            with zipfile.ZipFile(p, "r") as z:
-                z.testzip()
-            return p
-    except zipfile.BadZipFile:
-        return None
-    except Exception:
-        logger.exception("Template check failed")
-        return None
+    for p in TEMPLATE_CANDIDATES:
+        try:
+            if p.exists() and p.is_file() and p.suffix.lower() == ".docx" and p.stat().st_size > 0:
+                # Validate .docx container
+                with zipfile.ZipFile(p, "r") as z:
+                    z.testzip()
+                return p
+        except zipfile.BadZipFile:
+            continue
+        except Exception:
+            logger.exception(f"Template check failed for {p}")
+            continue
     return None
 
 def build_docx_from_attached_template(project: str, notes: str, R: dict,
@@ -1266,6 +1272,13 @@ if page in (t("nav.results","Results"), "Workspace"):
     with t2:
         project = st.text_input("Project Name", value="Sample Project")
         notes = st.text_area("Executive Notes")
+
+        tpl_path = find_report_template()
+        if tpl_path:
+            st.caption(f"Using report template: **{tpl_path}**")
+        else:
+            st.warning("No DOCX template found; will attempt PDF or DOCX fallback.")
+
 
         templ_docx = None
         if DOCX_OK:
@@ -1487,6 +1500,7 @@ if page in (t("nav.versions","Version"), "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
