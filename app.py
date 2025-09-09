@@ -41,7 +41,7 @@ def ensure_dir(p: Path):
         p.rename(backup)
     p.mkdir(parents=True, exist_ok=True)
 
-APP_DIR = Path(__file__).resolve().parent  # <— key change
+APP_DIR = Path.cwd() 
 ASSETS  = APP_DIR / "assets";      ensure_dir(ASSETS)
 DB_ROOT = ASSETS / "databases";    ensure_dir(DB_ROOT)
 GUIDES  = ASSETS / "guides";       ensure_dir(GUIDES)
@@ -922,19 +922,10 @@ def find_report_template() -> Optional[Path]:
     return None
 
 tpl = find_report_template()
-if not tpl:
-    st.error("No valid DOCX template at assets/guides/report_template_cleaned.docx. "
-             "Make sure it’s committed (exact name, case sensitive) and not corrupted.")
-    st.stop()
-st.caption(f"Using report template: **{tpl}** (size: {tpl.stat().st_size} bytes)")
-
-
-
-def find_report_template() -> Path | None:
-    if REPORT_TEMPLATE_PATH.exists() and REPORT_TEMPLATE_PATH.is_file():
-        return REPORT_TEMPLATE_PATH
-    return None
-
+if tpl:
+    st.caption(f"Using report template: **{tpl}** (size: {tpl.stat().st_size} bytes)")
+else:
+    st.info("DOCX template not found—will try PDF or DOCX fallback automatically.")
 
 def _replace_text_in_docx(doc, mapping: dict):
     for para in doc.paragraphs:
@@ -1198,6 +1189,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
