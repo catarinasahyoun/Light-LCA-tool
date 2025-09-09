@@ -892,7 +892,7 @@ def build_docx_fallback(project: str, notes: str, summary: dict, selected_materi
 REPORT_TEMPLATE_CANDIDATES = [
     Path("/mnt/data/Text_Report_Easy_LCA_Tool.docx"),
     Path("/mnt/data/Text_Report of the Easy LCA Tool (1).docx"),
-    GUIDES / "Text_Report of the Easy LCA Tool.docx",
+    GUIDES / "Text_Report_Easy_LCA_Tool.docx",
     GUIDES / "Text_Report of the Easy LCA Tool (1).docx",
 ]
 
@@ -1163,6 +1163,7 @@ if page in ("Version", "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
