@@ -548,7 +548,7 @@ with st.sidebar:
             t("nav.tool","Actual Tool"),
             t("nav.results","Results"),
             t("nav.versions","Version"),
-            t("nav.settings","Administrational Settings"),
+            t("nav.settings","Administrative Settings"),
         ]
         nav_map = {label: label for label in nav_labels}
         if "nav" in st.session_state and st.session_state.nav not in nav_labels:
@@ -598,6 +598,7 @@ with cr:
                             users[st.session_state.auth_user] = rec
                             _save_users(users)
                             st.success("Password changed.")
+                            _rerun()
                 st.markdown("---")
                 if st.button("Sign out"):
                     st.session_state.auth_user = None
@@ -799,7 +800,7 @@ if page == t("nav.user_guide","User Guide"):
 # -----------------------------
 # Administrational Settings
 # -----------------------------
-if page in (t("nav.settings","Administrational Settings"), "Settings"):
+if page in (t("nav.settings","Administrative Settings"), "Settings"):
     st.subheader("Database Manager")
     st.caption("Upload your Excel ONCE. It becomes the active database until you change it here.")
 
@@ -813,31 +814,30 @@ if page in (t("nav.settings","Administrational Settings"), "Settings"):
         up = st.file_uploader("Upload Excel (.xlsx) And Activate.", type=["xlsx"], key="db_upload")
         submitted = st.form_submit_button("Upload & Activate")
 
-if submitted:
-    if up is None:
-        st.warning("Please choose a .xlsx file first.")
-    else:
-        try:
-            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-            dest = DB_ROOT / f"database_{ts}.xlsx"
-            data = up.getvalue()  # use .getvalue() inside forms
-            # quick ZIP magic check for XLSX integrity
-            import io
+    if submitted:
+        if up is None:
+            st.warning("Please choose a .xlsx file first.")
+        else:
             try:
-                with zipfile.ZipFile(io.BytesIO(data)) as z:
-                    z.testzip()
+                ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+                dest = DB_ROOT / f"database_{ts}.xlsx"
+                data = up.getvalue()  # use .getvalue() inside forms
+                import io
+                try:
+                    with zipfile.ZipFile(io.BytesIO(data)) as z:
+                        z.testzip()
+                except Exception as e:
+                    raise ValueError("Uploaded file is not a valid .xlsx") from e
+
+                dest.write_bytes(data)
+                set_active_database(dest)  # no rerun; session updated
+
+                # Update the local 'active' variable below so the page reflects right away
+                active = dest
+                st.success(f"Saved and activated: {dest.name}")
             except Exception as e:
-                raise ValueError("Uploaded file is not a valid .xlsx") from e
-
-            dest.write_bytes(data)
-            set_active_database(dest)  # no rerun; session updated
-
-            # Update the local 'active' variable below so the page reflects right away
-            active = dest
-            st.success(f"Saved and activated: {dest.name}")
-        except Exception as e:
-            logger.exception("Upload failed")
-            st.error(f"Upload failed: {e}")
+                logger.exception("Upload failed")
+                st.error(f"Upload failed: {e}")
 
 
 # -----------------------------
@@ -849,7 +849,7 @@ if page in (t("nav.tool","Actual Tool"), "Inputs"):
     if active_path:
         st.success(f"Active database: **{active_path.name}**")
     else:
-        st.error("No active database found. Go to Administrational Settings → Database Manager.")
+        st.error("No active database found. Go to AdministrativeSettings → Database Manager.")
 
     st.caption("Optional: override for THIS session only")
     override = st.file_uploader("Session Override (.xlsx).", type=["xlsx"], key="override_db")
@@ -866,7 +866,7 @@ if page in (t("nav.tool","Actual Tool"), "Inputs"):
         xls = load_active_excel()
 
     if not xls:
-        st.error("No Excel could be opened. Go to Administrational Settings or use the override above.")
+        st.error("No Excel could be opened. Go to Administrative Settings or use the override above.")
         st.stop()
 
     auto_mat = _find_sheet(xls, "Materials") or xls.sheet_names[0]
@@ -883,8 +883,12 @@ if page in (t("nav.tool","Actual Tool"), "Inputs"):
     try:
         mats_df = pd.read_excel(xls, sheet_name=mat_choice)
         procs_df = pd.read_excel(xls, sheet_name=proc_choice)
-        st.session_state.materials = parse_materials(mats_df)
-        st.session_state.processes = parse_processes(procs_df)
+
+        m_sig = _df_sig(mats_df)
+        p_sig = _df_sig(procs_df)
+        st.session_state.materials = _parse_materials_cached(mats_df, m_sig) or {}
+        st.session_state.processes = _parse_processes_cached(procs_df, p_sig) or {}
+
     except Exception as e:
         logger.exception("Read/parse failed")
         st.error(f"Could not read the selected sheets: {e}")
@@ -1530,6 +1534,7 @@ if page in (t("nav.versions","Version"), "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
