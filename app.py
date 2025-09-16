@@ -1069,56 +1069,107 @@ def build_pdf_from_template(project: str, notes: str, summary: dict, selected_ma
 
 # ---------- DOCX helpers (step 16) ----------
 def _replace_text_in_docx(doc, mapping: dict):
-    def apply_map(text: str) -> str:
-        for k, v in mapping.items():
-            text = text.replace(k, v)
-        return text
+    """
+    Robustly replace {TOKENS} across Word 'runs'.
+    mapping keys must include the braces, e.g. "{PROJECT}": "My Project".
+    """
 
-    # Replace in body paragraphs
+    import re
+
+    token_re = re.compile("|".join(re.escape(k) for k in mapping.keys())) if mapping else None
+    if not token_re:
+        return
+
+    def replace_in_runs(paragraph):
+        if not paragraph.runs:
+            # also handle empty paragraphs that still carry full text
+            if paragraph.text:
+                new_text = token_re.sub(lambda m: str(mapping[m.group(0)]), paragraph.text)
+                if new_text != paragraph.text:
+                    paragraph.text = new_text
+            return
+
+        full = "".join(r.text for r in paragraph.runs)
+        if not full:
+            return
+        new_full = token_re.sub(lambda m: str(mapping[m.group(0)]), full)
+
+        if new_full == full:
+            return
+
+        # Put the entire rebuilt string back into the first run; clear the others
+        paragraph.runs[0].text = new_full
+        for r in paragraph.runs[1:]:
+            r.text = ""
+
+    # Body paragraphs
     for p in doc.paragraphs:
-        new = apply_map(p.text)
-        if new != p.text:
-            p.text = new  # safe: python-docx rebuilds runs
+        replace_in_runs(p)
 
-    # Replace inside table cells
+    # Tables
     for tbl in doc.tables:
         for row in tbl.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    new = apply_map(p.text)
-                    if new != p.text:
-                        p.text = new
+                    replace_in_runs(p)
+
+    # Headers/footers (if you add tokens there)
+    for sec in doc.sections:
+        for p in getattr(sec.header, "paragraphs", []):
+            replace_in_runs(p)
+        for p in getattr(sec.footer, "paragraphs", []):
+            replace_in_runs(p)
 
 def _materials_table_block(doc, rows: list):
-    doc.add_heading("Material Comparison Overview", level=2)
-
+    """
+    If the template contains a paragraph with {MATERIALS_TABLE}, we insert
+    the table there. Otherwise we append it (current behavior).
+    """
     headers = ["Material", "CO₂e per Unit (kg CO₂e)", "Avg. Recycled Content",
                "Circularity", "End-of-Life", "Tree Equivalent*"]
 
-    # Use a built-in table style for better compatibility
-    try:
-        table = doc.add_table(rows=1, cols=len(headers), style="Table Grid")
-    except Exception:
-        table = doc.add_table(rows=1, cols=len(headers))  # fallback
+    target_p = None
+    for p in doc.paragraphs:
+        if "{MATERIALS_TABLE}" in p.text:
+            target_p = p
+            break
 
-    hdr = table.rows[0].cells
-    for i, h in enumerate(headers):
-        hdr[i].text = h
+    def build_table():
+        try:
+            tbl = doc.add_table(rows=1, cols=len(headers), style="Table Grid")
+        except Exception:
+            tbl = doc.add_table(rows=1, cols=len(headers))
+        hdr = tbl.rows[0].cells
+        for i, h in enumerate(headers):
+            hdr[i].text = h
+        for r in rows:
+            c = tbl.add_row().cells
+            for i, v in enumerate(r):
+                c[i].text = str(v)
+        return tbl
 
-    for r in rows:
-        c = table.add_row().cells
-        for i, v in enumerate(r):
-            c[i].text = str(v)
+    if target_p:
+        # clear placeholder text
+        target_p.text = ""
+        parent = target_p._p.getparent()
+        idx = parent.index(target_p._p)
+        tbl = build_table()
+        tbl_el = tbl._element
+        parent.remove(tbl_el)
+        parent.insert(idx + 1, tbl_el)
+    else:
+        # fallback: append at the end, with heading
+        doc.add_heading("Material Comparison Overview", level=2)
+        build_table()
 
     doc.add_paragraph(
         "*Estimated number of trees required to sequester the CO₂e emissions from one unit "
         "over the selected years."
     )
-
 TEMPLATE_CANDIDATES = [
-    Path("/mnt/data/report_template_cleaned.docx"),
-    GUIDES / "report_template_cleaned.docx",
+    GUIDES / "report_template_cleaned.docx",          
     ASSETS / "guides" / "report_template_cleaned.docx",
+    Path("/mnt/data/report_template_cleaned.docx"),     
 ]
 
 def find_report_template() -> Optional[Path]:
@@ -1534,6 +1585,7 @@ if page in (t("nav.versions","Version"), "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
