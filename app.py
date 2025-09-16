@@ -272,54 +272,41 @@ if "auth_user" not in st.session_state:
 def list_databases() -> List[Path]:
     return sorted(DB_ROOT.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
 
-def set_active_database(path: Path):
-    ACTIVE_DB_FILE.write_text(json.dumps({"path": str(path)}))
-    st.session_state.active_db_path = str(path)   # update session immediately
-    st.success(f"Activated database: {path.name}")
+DB_ROOT = Path("assets/databases")
+DB_ROOT.mkdir(parents=True, exist_ok=True)
+ACTIVE_DB_FILE = DB_ROOT / "active.json"
 
-def get_active_database_path() -> Optional[Path]:
-    # Prefer session value (set when you activate in this run)
-    sess_path = Path(st.session_state.get("active_db_path", "")) if st.session_state.get("active_db_path") else None
-    if sess_path and sess_path.exists():
-        return sess_path
+def set_active_database(uploaded_file):
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = DB_ROOT / f"database_{ts}.xlsx"
+    data = uploaded_file.getvalue()
+    dest.write_bytes(data)
+    ACTIVE_DB_FILE.write_text(json.dumps({"path": str(dest)}))
+    return dest
 
-    # Then fall back to the persisted json
+def get_active_database():
     if ACTIVE_DB_FILE.exists():
         try:
             data = json.loads(ACTIVE_DB_FILE.read_text())
-            p = Path(data.get("path", ""))
+            p = Path(data["path"])
             if p.exists():
-                return p
+                return pd.ExcelFile(str(p))
         except Exception:
             pass
-
-    # Otherwise default to newest DB or sample candidates
-    dbs = list_databases()
-    if dbs:
-        return dbs[0]
-
-    for candidate in [ASSETS / "Refined database.xlsx", Path("Refined database.xlsx"), Path("database.xlsx")]:
-        if candidate.exists():
-            return candidate
     return None
 
-# -----------------------------
-# Caching helpers (step 5)
-# -----------------------------
-@st.cache_resource(show_spinner=False)  # <-- resources can be non-picklable
-def _open_xls_cached(path_str: str, mtime: float) -> pd.ExcelFile:
-    # mtime stays as an argument to invalidate cache when the file changes
-    return pd.ExcelFile(path_str)
 
-def load_active_excel() -> Optional[pd.ExcelFile]:
-    p = get_active_database_path()
-    if p and p.exists():
-        try:
-            return pd.ExcelFile(str(p))
-        except Exception as e:
-            st.error(f"Failed to open Excel: {p.name} — {e}")
-            return None
-    return None
+xls = None
+if uploaded_file:
+    xls = pd.ExcelFile(uploaded_file)
+    set_active_database(uploaded_file)
+else:
+    xls = get_active_database()
+
+if not xls:
+    st.error("No active database found. Please upload one.")
+    st.stop()
+
 
 
 @st.cache_data(show_spinner=False)
@@ -1585,6 +1572,7 @@ if page in (t("nav.versions","Version"), "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
