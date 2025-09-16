@@ -12,25 +12,6 @@ from decimal import Decimal, InvalidOperation
 # ================================
 # TCHAI — Easy LCA Indicator (v4+)
 # -------------------------------
-# ✓ Sign-in (3 pre-created users)
-# ✓ Settings → Upload & Activate a PERMANENT database (persists until changed)
-# ✓ Inputs: tolerant parsing, NO Excel previews, clear process dropdowns
-# ✓ Workspace: Results & Comparison → Final Summary → Report (PDF) → Versions
-# ✓ User Guide: first page after sign-in; inline if possible, always downloadable
-# ✓ PDF Report: smart-filled from live inputs; DOCX fallback if PDF backend missing
-# ✓ Safe folder creation (avoids FileExistsError)
-# ✓ Caching for Excel + parsing (step 5)
-# ✓ Better number parsing (step 6)
-# ✓ Session schema w/ Pydantic (step 7)
-# ✓ Smarter column detection (step 8)
-# ✓ Better status/tooltips (step 11)
-# ✓ Simple i18n hooks (step 13)
-# ✓ Robust DOCX replacements (step 16)
-# ✓ Sanitize version names (step 18)
-# ✓ Logging (step 21)
-# ✓ Pinned requirements (step 22)
-# ✓ Font fallback embedding (step 23)
-# ================================
 
 st.set_page_config(
     page_title="TCHAI — Easy LCA Indicator",
@@ -271,42 +252,42 @@ if "auth_user" not in st.session_state:
 
 def list_databases() -> List[Path]:
     return sorted(DB_ROOT.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
+def set_active_database(path: Path):
+    """Persist the chosen DB path and mirror it in session."""
+    ACTIVE_DB_FILE.write_text(json.dumps({"path": str(path)}))
+    st.session_state.active_db_path = str(path)
 
-DB_ROOT = Path("assets/databases")
-DB_ROOT.mkdir(parents=True, exist_ok=True)
-ACTIVE_DB_FILE = DB_ROOT / "active.json"
+def get_active_database_path() -> Optional[Path]:
+    """Return the active DB file (session → active.json → newest .xlsx)."""
+    sess = st.session_state.get("active_db_path")
+    if sess and Path(sess).exists():
+        return Path(sess)
 
-def set_active_database(uploaded_file):
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    dest = DB_ROOT / f"database_{ts}.xlsx"
-    data = uploaded_file.getvalue()
-    dest.write_bytes(data)
-    ACTIVE_DB_FILE.write_text(json.dumps({"path": str(dest)}))
-    return dest
-
-def get_active_database():
     if ACTIVE_DB_FILE.exists():
         try:
             data = json.loads(ACTIVE_DB_FILE.read_text())
-            p = Path(data["path"])
+            p = Path(data.get("path", ""))
             if p.exists():
-                return pd.ExcelFile(str(p))
+                return p
         except Exception:
             pass
+
+    dbs = list_databases()
+    return dbs[0] if dbs else None
+
+@st.cache_resource(show_spinner=False)
+def _open_xls_cached(path_str: str, mtime: float) -> pd.ExcelFile:
+    return pd.ExcelFile(path_str)
+
+def load_active_excel() -> Optional[pd.ExcelFile]:
+    p = get_active_database_path()
+    if p and p.exists():
+        try:
+            return pd.ExcelFile(str(p))
+        except Exception as e:
+            st.error(f"Failed to open Excel: {p.name} — {e}")
+            return None
     return None
-
-
-xls = None
-if uploaded_file:
-    xls = pd.ExcelFile(uploaded_file)
-    set_active_database(uploaded_file)
-else:
-    xls = get_active_database()
-
-if not xls:
-    st.error("No active database found. Please upload one.")
-    st.stop()
-
 
 
 @st.cache_data(show_spinner=False)
@@ -1572,6 +1553,7 @@ if page in (t("nav.versions","Version"), "📁 Versions"):
             if st.button("🗑️ Delete"):
                 ok, msg = vm.delete(sel)
                 st.success(msg) if ok else st.error(msg)
+
 
 
 
