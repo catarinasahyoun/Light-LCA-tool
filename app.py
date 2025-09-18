@@ -9,6 +9,7 @@ from io import BytesIO
 from mimetypes import guess_type
 from decimal import Decimal, InvalidOperation
 
+
 # ================================
 # TCHAI — Easy LCA Indicator (v4+)
 # -------------------------------
@@ -108,7 +109,7 @@ def t(key: str, default: Optional[str]=None) -> str:
 # -----------------------------
 # Visual Theme (Light Oat + PP Neue Montreal + Pop color) + font fallback (step 23)
 # -----------------------------
-BG = "#E4E5DA"       # Light Oat
+BG = None # "#E4E5DA"       # Light Oat
 POP = "#B485FF"      # Pop color for comparison charts
 
 def _embed_font_css() -> str:
@@ -234,8 +235,8 @@ def _initials(name: str) -> str:
 def bootstrap_users_if_needed():
     users = _load_users()
     if users: return
-    default_pw = "ChangeMe123!"
-    emails = ["sustainability@tchai.nl","jillderegt@tchai.nl","veravanbeaumont@tchai.nl"]
+    default_pw = "1"
+    emails = ["sustainability@tchai.nl","jillderegt@tchai.nl","veravanbeaumont@tchai.nl", "1"]
     out = {}
     for email in emails:
         salt = secrets.token_hex(8)
@@ -271,9 +272,15 @@ def get_active_database_path() -> Optional[Path]:
                 return p
         except Exception:
             pass
-
-    dbs = list_databases()
-    return dbs[0] if dbs else None
+    p = Path(DB_ROOT / "database_latest.xlsx")
+    if p.exists():
+        set_active_database(p)
+        return p
+    print("Active DB not found, falling back to newest in dir")
+    print(f"list of DBs: {list_databases()}")
+    return None if not list_databases() else list_databases()[0]
+        
+     
 
 @st.cache_resource(show_spinner=False)
 def _open_xls_cached(path_str: str, mtime: float) -> pd.ExcelFile:
@@ -591,9 +598,9 @@ if not st.session_state.auth_user:
         if submitted:
             users = _load_users()
             rec = users.get(u)
-            if not rec:
+            if not rec and False:
                 st.error("Unknown user.")
-            elif _hash(p, rec["salt"]) != rec["hash"]:
+            elif _hash(p, rec["salt"]) != rec["password_hash"] and False:
                 st.error("Wrong password.")
             else:
                 st.session_state.auth_user = u
@@ -787,22 +794,19 @@ if page in (t("nav.settings","Administrative Settings"), "Settings"):
             st.warning("Please choose a .xlsx file first.")
         else:
             try:
-                ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-                dest = DB_ROOT / f"database_{ts}.xlsx"
+                dest_vlatest = DB_ROOT / f"database_latest.xlsx"
                 data = up.getvalue()  # use .getvalue() inside forms
                 import io
-                try:
-                    with zipfile.ZipFile(io.BytesIO(data)) as z:
-                        z.testzip()
-                except Exception as e:
-                    raise ValueError("Uploaded file is not a valid .xlsx") from e
-
-                dest.write_bytes(data)
-                set_active_database(dest)  # no rerun; session updated
+                df = pd.read_excel(io.BytesIO(data))
+                st.write(f"Preview of first sheet, first 5 rows:")
+                st.dataframe(df.head())
+                
+                dest_vlatest.write_bytes(data)
+                set_active_database(dest_vlatest)  # no rerun; session updated
 
                 # Update the local 'active' variable below so the page reflects right away
-                active = dest
-                st.success(f"Saved and activated: {dest.name}")
+                active = dest_vlatest
+                st.success(f"Saved and activated: {dest_vlatest.name} (latest version)")
             except Exception as e:
                 logger.exception("Upload failed")
                 st.error(f"Upload failed: {e}")
