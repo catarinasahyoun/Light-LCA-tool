@@ -1,0 +1,10 @@
+/venv
+
+#pycache
+__pycache__
+
+#database
+lca_versions
+databases
+i18n
+logs
