@@ -22,7 +22,7 @@ class ResultsPage:
     @staticmethod
     def render():
         """Render the complete results page."""
-        st.markdown("## 📊 Results & Analysis")
+        st.markdown("## Results & Analysis")
         
         # Check if we have materials selected
         if not st.session_state.assessment.get('selected_materials'):
