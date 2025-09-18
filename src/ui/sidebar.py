@@ -37,16 +37,6 @@ class Sidebar:
                     ]
                 )
                 
-                # Language selector
-                st.markdown("---")
-                lang = st.selectbox(
-                    "Language",
-                    options=["en", "nl", "fr"],
-                    index=["en", "nl", "fr"].index(st.session_state.get("lang", "en"))
-                )
-                if lang != st.session_state.get("lang"):
-                    Translator.set_language(lang)
-                    st.rerun()
                 
                 # User info and logout
                 st.markdown("---")
