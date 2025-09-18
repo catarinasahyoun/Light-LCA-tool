@@ -54,7 +54,7 @@ class VersionsPage:
                 col3.metric("Recycled Content", f"{results['recycled_content_pct']:.1f}%")
         
         # Save button
-        if st.button("💾 Save Version", type="primary"):
+        if st.button("Save Version", type="primary"):
             if not name.strip():
                 st.error("Please enter a version name.")
             else:
@@ -160,7 +160,7 @@ class VersionsPage:
     @staticmethod
     def _render_manage_tab(vm: VersionManager):
         """Render the manage versions tab."""
-        st.subheader("🗂️ Manage Versions")
+        st.subheader("Manage Versions")
         
         metadata = vm.list_versions()
         
