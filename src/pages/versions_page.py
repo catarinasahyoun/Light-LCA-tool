@@ -20,7 +20,7 @@ class VersionsPage:
     @staticmethod
     def _render_save_tab(vm: VersionManager):
         """Render the save version tab."""
-        st.subheader("💾 Save Current Assessment")
+        st.subheader("Save Current Assessment")
         
         # Check if there's data to save
         if not st.session_state.get("assessment", {}).get("selected_materials"):
