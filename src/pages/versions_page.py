@@ -42,7 +42,7 @@ class VersionsPage:
         
         # Show preview of what will be saved
         if st.session_state.get("materials") and st.session_state.get("assessment"):
-            with st.expander("📋 Preview of data to be saved"):
+            with st.expander("Preview of data to be saved"):
                 results = LCACalculator.compute_results(
                     st.session_state.assessment,
                     st.session_state.materials
@@ -81,7 +81,7 @@ class VersionsPage:
     @staticmethod
     def _render_load_tab(vm: VersionManager):
         """Render the load version tab."""
-        st.subheader("📂 Load Saved Version")
+        st.subheader("Load Saved Version")
         
         metadata = vm.list_versions()
         
@@ -147,7 +147,7 @@ class VersionsPage:
                 st.info("✅ Version loaded! Go to the Actual Tool or Results page to see the loaded data.")
                 
                 # Show what was loaded
-                with st.expander("📋 Loaded data preview"):
+                with st.expander("Loaded data preview"):
                     st.write(f"**Materials:** {len(data.get('selected_materials', []))}")
                     st.write(f"**Lifetime:** {data.get('lifetime_weeks', 52)} weeks")
                     if data.get('selected_materials'):
@@ -207,7 +207,7 @@ class VersionsPage:
         
         # Show details of version to delete
         if version_to_delete:
-            with st.expander(f"📋 Details for '{version_to_delete}'"):
+            with st.expander(f" Details for '{version_to_delete}'"):
                 info = metadata[version_to_delete]
                 st.write(f"**Description:** {info.get('description', 'No description')}")
                 st.write(f"**Created:** {info.get('created_at', '')}")
@@ -221,11 +221,11 @@ class VersionsPage:
                 st.session_state[f"confirm_delete_{version_to_delete}"] = False
             
             if not st.session_state[f"confirm_delete_{version_to_delete}"]:
-                st.warning(f"⚠️ Are you sure you want to delete '{version_to_delete}'?")
+                st.warning(f" Are you sure you want to delete '{version_to_delete}'?")
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.button("✅ Yes, Delete", key=f"confirm_yes_{version_to_delete}"):
+                    if st.button(" Yes, Delete", key=f"confirm_yes_{version_to_delete}"):
                         success, message = vm.delete(version_to_delete)
                         if success:
                             st.success(message)
@@ -234,13 +234,13 @@ class VersionsPage:
                             st.error(message)
                 
                 with col2:
-                    if st.button("❌ Cancel", key=f"confirm_no_{version_to_delete}"):
+                    if st.button(" Cancel", key=f"confirm_no_{version_to_delete}"):
                         st.info("Deletion cancelled.")
     
     @staticmethod
     def render():
         """Render the complete versions page."""
-        st.header("📁 Version Management")
+        st.header(" Version Management")
         st.markdown("Save, load, and manage different versions of your LCA assessments.")
         
         # Initialize version manager
@@ -250,7 +250,7 @@ class VersionsPage:
         vm = st.session_state.version_manager
         
         # Create tabs
-        tab1, tab2, tab3 = st.tabs(["💾 Save", "📂 Load", "🗂️ Manage"])
+        tab1, tab2, tab3 = st.tabs([" Save", " Load", " Manage"])
         
         with tab1:
             VersionsPage._render_save_tab(vm)
