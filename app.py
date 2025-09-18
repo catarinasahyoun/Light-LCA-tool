@@ -29,6 +29,17 @@ Flow:
 Author: TCHAI Team
 Version: 2.0 (Modular Architecture)
 """
+import sys
+import os
+from pathlib import Path
+
+# Add src directory to Python path for Streamlit Cloud compatibility
+current_dir = Path(__file__).parent
+src_dir = current_dir / "src"
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
+
+
 
 import streamlit as st
 
