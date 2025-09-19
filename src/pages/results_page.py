@@ -114,17 +114,8 @@ class ResultsPage:
     @staticmethod
     def _render_report_section(R: Dict[str, Any]):
         """Render the report generation tab"""
-        def gen_rep(fmt):
-            if fmt == '.docx':
-                return generate_docx_report,"vnd.openxmlformats-officedocument.wordprocessingml.document" 
-            elif fmt == '.pdf':
-                return generate_pdf_report, "pdf"
-            else:
-                raise ValueError("Unsupported format for report generation.")
-        
         project = st.text_input("Project Name", value="Sample Project")
         notes = st.text_area("Executive Notes")
-        report_format = st.radio("Report Format", options=['.docx', '.pdf'], help="PDF is widely compatible, but DOCX can be edited.")
 
         tpl_path = TEMPLATE
         if tpl_path:
@@ -132,7 +123,8 @@ class ResultsPage:
         else:
             st.warning("No DOCX template found; will attempt PDF or DOCX fallback.")
 
-        gen_func, mime = gen_rep(report_format)
+        mime = "vnd.openxmlformats-officedocument.wordprocessingml.document" 
+        gen_func = generate_docx_report
         report = gen_func(project, notes, R, 
                               st.session_state.assessment["selected_materials"], 
                               st.session_state.materials, 
