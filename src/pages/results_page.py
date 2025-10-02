@@ -459,32 +459,48 @@ class ResultsPage:
             doc.add_paragraph("")
 
             # Sections
-            doc.add_heading("Introduction", level=1)
-            doc.add_paragraph(INTRO_TEXT)
+            def add_title(doc, text, size=16):
+                p = doc.add_paragraph()
+                r = p.add_run(text)
+                r.bold = True
+                r.font.size = Pt(size)
+                r.font.color.rgb = RGBColor(0,0,0)
+                return p
 
-            doc.add_heading("Different tracks, shared direction", level=1)
+            # ----- Different tracks -----
+            add_title(doc, "Different tracks, shared direction")
             for para in TRACKS_TEXT.split("\n"):
                 if para.strip():
                     doc.add_paragraph(para.strip())
             for bullet in CRITERIA_BULLETS:
-                doc.add_paragraph(f"• {bullet}")
+                p = doc.add_paragraph(style="List Bullet")
+                r = p.add_run(bullet)
+                r.font.size = Pt(11)
+                r.font.color.rgb = RGBColor(0,0,0)
 
-            doc.add_heading("Materials Included in the Analysis", level=1)
+            # ----- Materials Included -----
+            add_title(doc, "Materials Included in the Analysis")
             if material_list:
                 for m in material_list:
-                    doc.add_paragraph(f"• {m}")
+                    p = doc.add_paragraph(style="List Bullet")
+                    r = p.add_run(m)
+                    r.font.size = Pt(11)
+                    r.font.color.rgb = RGBColor(0,0,0)
             else:
                 doc.add_paragraph("—")
 
-            doc.add_heading("Considerations and Scope", level=1)
+            # ----- Considerations & Scope -----
+            add_title(doc, "Considerations and Scope")
             for para in CONSIDERATIONS_SCOPE.split("\n"):
                 if para.strip():
                     doc.add_paragraph(para.strip())
 
-            doc.add_heading("Results Summary (Key Figures)", level=1)
+            # ----- Results Summary (KPIs) -----
+            add_title(doc, "Results Summary (Key Figures)")
             tbl = doc.add_table(rows=0, cols=2)
             tbl.alignment = WD_TABLE_ALIGNMENT.LEFT
             tbl.style = "Light Grid"
+            
             def add_kpi(label, value):
                 row = tbl.add_row().cells
                 row[0].text = label
