@@ -29,6 +29,7 @@ Flow:
 Author: TCHAI Team
 Version: 2.0 (Modular Architecture)
 """
+
 import sys
 import os
 from pathlib import Path
@@ -58,14 +59,12 @@ from src.ui import UIStyles, Sidebar, Header, AuthComponents
 from src.utils.i18n import Translator
 
 # Application pages and views
-from src.pages import (
-    ToolPage, 
-    ResultsPage, 
-    UserGuidePage, 
-    SettingsPage, 
-    VersionsPage
-
+# Application pages and views
+from src.pages.tool_page import ToolPage
 from src.pages.results_page import ResultsPage
+from src.pages.user_guide_page import UserGuidePage
+from src.pages.settings_page import SettingsPage
+from src.pages.versions_page import VersionsPage
 
 )
 
