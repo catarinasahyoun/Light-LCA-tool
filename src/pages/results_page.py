@@ -513,20 +513,22 @@ class ResultsPage:
 
             doc.add_paragraph("*Estimated number of trees required to sequester the CO₂e emissions over the project lifespan.")
 
-            doc.add_heading("Material Comparison Overview", level=1)
+            # ----- Material Comparison Overview -----
+            add_title(doc, "Material Comparison Overview")
             cols = ["Material", "CO2e per Unit (kg CO2e)", "Avg. Recycled Content", "Circularity", "End-of-Life", "Tree Equivalent*"]
             table = doc.add_table(rows=1, cols=len(cols))
             table.style = "Light Grid"
             hdr = table.rows[0].cells
             for j, col in enumerate(cols):
                 hdr[j].text = col
+
             for _, row in df_compare.iterrows():
                 mat = str(row.get("Material", ""))
                 co2 = float(row.get("CO2e per kg", 0.0) or 0.0)
                 rec = row.get("Recycled Content (%)", "")
                 circ = row.get("Circularity (text)", row.get("Circularity (mapped)", ""))
                 eol = eol_summary.get(mat, "")
-                tree_eq = co2/(22.0*lifetime_years) if lifetime_years>0 else 0
+                tree_eq = co2/(22.0*lifetime_years) if lifetime_years > 0 else 0
                 cells = table.add_row().cells
                 cells[0].text = mat
                 cells[1].text = f"{co2:.2f}"
@@ -535,7 +537,8 @@ class ResultsPage:
                 cells[4].text = str(eol)
                 cells[5].text = f"{tree_eq:.2f}"
 
-            doc.add_heading("Conclusion", level=1)
+            # ----- Conclusion -----
+            add_title(doc, "Conclusion")
             for para in CONCLUSION_TEXT.split("\n"):
                 if para.strip():
                     doc.add_paragraph(para.strip())
