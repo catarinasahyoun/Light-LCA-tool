@@ -317,7 +317,7 @@ class ResultsPage:
 
         try:
             from docx import Document
-            from docx.shared import Pt, Inches
+            from docx.shared import Pt, Inches, RGBColor
             from docx.enum.text import WD_ALIGN_PARAGRAPH
             from docx.enum.table import WD_TABLE_ALIGNMENT
         except Exception:
