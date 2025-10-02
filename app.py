@@ -67,7 +67,6 @@ from src.pages.settings_page import SettingsPage
 from src.pages.versions_page import VersionsPage
 
 
-
 def main():
     """
     Main application function that initializes and runs the TCHAI LCA Tool.
