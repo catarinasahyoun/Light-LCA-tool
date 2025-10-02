@@ -224,7 +224,102 @@ class ToolPage:
             st.session_state.assessment = Assessment().model_dump()
         
         ToolPage._ensure_assessment_model()
-        
+
+        # ---- Compute results + publish to session_state (so Results tabs can read them) ----
+        assess = st.session_state.assessment
+        materials_db = st.session_state.materials or {}
+        processes_db = st.session_state.processes or {}
+
+        selected = assess.get("selected_materials", []) or []
+        masses = assess.get("material_masses", {}) or {}
+        proc_data = assess.get("processing_data", {}) or {}
+        lifetime_weeks = int(assess.get("lifetime_weeks", 52) or 52)
+        lifetime_years = lifetime_weeks / 52.0
+
+        # Totals
+        total_material_co2 = 0.0
+        total_process_co2 = 0.0
+        total_mass = 0.0
+        recycled_mass = 0.0
+
+        # Build comparison rows for charts
+        comparison_rows = []
+        for mat in selected:
+            props = materials_db.get(mat, {}) or {}
+            mass_kg = float(masses.get(mat, 0.0) or 0.0)
+
+            # Material factors with safe defaults
+            co2_per_kg = float(props.get("CO₂e (kg)", props.get("CO2e (kg)", 0.0) or 0.0))
+            recycled_pct = float(props.get("Recycled Content", 0.0) or 0.0)
+
+            # Optional: if you have a text circularity value in your DB, map it; else default 0..3
+            circ_text = str(props.get("Circularity", "") or "").strip().lower()
+            circ_map = {"not circular": 0, "low": 1, "medium": 2, "high": 3}
+            circ_val = circ_map.get(circ_text, 0)
+
+            #   Lifetime per-material if present; else use global
+            mat_life_years = float(props.get("Lifetime (years)", lifetime_years) or lifetime_years)
+
+            # Material CO2
+            mat_co2 = mass_kg * co2_per_kg
+            total_material_co2 += mat_co2
+
+            # Processes for this material
+            for step in (proc_data.get(mat, []) or []):
+                p = processes_db.get(step.get("process", ""), {}) or {}
+                step_amount = float(step.get("amount", 0.0) or 0.0)
+                # Prefer step-stored factor; fallback to DB factor key "CO₂e" / "CO2e"
+                step_factor = float(step.get("co2e_per_unit", p.get("CO₂e", p.get("CO2e", 0.0)) or 0.0))
+                total_process_co2 += step_amount * step_factor
+
+            # Recycled mass contribution
+            total_mass += mass_kg
+            recycled_mass += mass_kg * (recycled_pct / 100.0)
+
+            # Row for comparison charts
+            comparison_rows.append({
+                "Material": mat,
+                "CO2e per kg": co2_per_kg,
+                "Recycled Content (%)": recycled_pct,
+                "Circularity (mapped)": circ_val,
+                "Lifetime (years)": mat_life_years,
+            })
+
+        overall_co2 = total_material_co2 + total_process_co2
+        weighted_recycled = (recycled_mass / total_mass * 100.0) if total_mass > 0 else 0.0
+
+        # Simple tree equivalent (approx sequestration ~22 kg CO2 per tree-year)
+        TREE_SEQUESTRATION_PER_YEAR = 22.0
+        trees_equiv = overall_co2 / (TREE_SEQUESTRATION_PER_YEAR * max(lifetime_years, 1e-9))
+
+        # ---- Build a concise HTML summary (as your Results expects) ----
+        final_summary_html = f"""
+        <div style='padding:12px;border:1px solid #e0e0e0;border-radius:8px'>
+          <h3 style="margin:0 0 8px 0;">Final Summary</h3>
+          <ul style="margin:0 0 8px 20px;">
+            <li><b>Total CO₂ – Materials:</b> {total_material_co2:.2f} kg</li>
+            <li><b>Total CO₂ – Processes:</b> {total_process_co2:.2f} kg</li>
+            <li><b>Overall CO₂:</b> {overall_co2:.2f} kg</li>
+            <li><b>Weighted Recycled Content:</b> {weighted_recycled:.1f}%</li>
+            <li><b>Tree Equivalent:</b> {trees_equiv:.2f} trees (over {lifetime_years:.1f} years)</li>
+          </ul>
+        </div>
+        """
+
+        # ---- Publish to session_state for the Results page ----
+        st.session_state.final_summary_html   = final_summary_html
+        st.session_state.comparison_data      = comparison_rows
+        st.session_state.total_material_co2   = total_material_co2
+        st.session_state.total_process_co2    = total_process_co2
+        st.session_state.overall_co2          = overall_co2
+        st.session_state.weighted_recycled    = weighted_recycled
+        st.session_state.trees_equiv          = trees_equiv
+        st.session_state.lifetime_weeks       = lifetime_weeks
+
+        # Optional: project name (used for the Report filename)
+        if "project_name" not in st.session_state:
+            st.session_state.project_name = "Unnamed_Project"
+
         # Database section
         override_file = ToolPage._render_database_section()
         xls = ToolPage._load_excel_data(override_file)
