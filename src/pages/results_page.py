@@ -133,7 +133,19 @@ class ResultsPage:
         st.download_button(
             "⬇️ Download Report (DOCX From Template)",
             data=report,
-            file_name=f"TCHAI_Report_{project.replace(' ','_')}{report_format}",
+            # Get project name safely from session_state
+import re
+project_name = st.session_state.get("project_name", "Unnamed_Project")
+
+# Clean it up for filename use
+safe_project = re.sub(r"[^A-Za-z0-9._-]", "_", project_name.strip().replace(" ", "_"))
+
+# Make sure report_format starts with a dot
+if report_format and not report_format.startswith("."):
+    report_format = f".{report_format}"
+
+file_name = f"TCHAI_Report_{safe_project}{report_format}"
+
             mime=f"application/{mime}"
         )
         
