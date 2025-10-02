@@ -11,6 +11,11 @@ class ResultsPage:
         name = (name or "").strip().replace(" ", "_")
         return re.sub(r"[^A-Za-z0-9._-]", "_", name) or "Unnamed_Project"
 
+    @staticmethod
+    def render():
+     """Public entry point used by app.py"""
+     ResultsPage._render_report_section(R=None)
+
     @staticmethod
     def _render_report_section(R):
         """
