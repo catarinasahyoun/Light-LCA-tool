@@ -328,18 +328,20 @@ class ResultsPage:
 
         # ---------- static reference text ----------
         INTRO_TEXT = (
-            "At Tchai we build differen: within every brand space we design we try to leave a "
-            "positive mark on people and planet. Our Easy LCA tool helps us see the real footprint "
+            "At Tchai we build different: within every brand space we design we try to leave a "
+            "positive mark on people and planet.\n"
+            "Our Easy LCA tool helps us see the real footprint "
             "of a concept before it’s built: materials, transport, end of life. With those numbers "
-            "we can adjust, swap, or simplify. By 2030 we want every solution we deliver to have a "
+            "we can adjust, swap, or simplify.\n"
+            "By 2030 we want every solution we deliver to have a "
             "clear, positive influence. Tracking impact now is a practical step toward that goal."
         )
 
         TRACKS_TEXT = (
-            "Different tracks, shared direction: sustainability\n"
             "Within every design process, we aim to integrate sustainability as early and as broadly as possible. "
             "We deliberately take a wide-angle approach: to us, sustainability is the result of a series of choices "
-            "and trade-offs, not a one-size-fits-all solution. For some organizations, the focus lies on CO2e emissions; "
+            "and trade-offs, not a one-size-fits-all solution.\n"
+            "For some organizations, the focus lies on CO2e emissions; "
             "for others, it's on circularity, reuse, or social responsibility. We believe that each organization follows "
             "its own sustainability journey.\n"
             "At this conceptual stage, we used a consistent design to evaluate each material’s environmental impact based on the following criteria:"
@@ -368,8 +370,8 @@ class ResultsPage:
         )
 
         CONCLUSION_TEXT = (
-            "Conclusion: Sustainability That Goes Beyond the Numbers\n"
-            "Not every improvement appears in a CO2e score, but that doesn’t make it less important. This comparison doesn’t "
+            "Not every improvement appears in a CO2e score, but that doesn’t make it less important.\n"
+            "This comparison doesn’t "
             "point to a single perfect material, and that’s the point. Each option presents distinct strengths and trade-offs. "
             "The real opportunity lies in combining these insights to shape a smarter, more sustainable design.\n"
             "The final design will likely use a mix of materials, balancing functionality, durability, and environmental impact. "
