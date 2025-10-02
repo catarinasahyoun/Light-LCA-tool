@@ -36,37 +36,6 @@ import io
 from pathlib import Path
 import streamlit as st
 
-def asset(path: str) -> str:
-    """Resolve an asset path safely from anywhere (local & Streamlit Cloud)."""
-    here = Path(__file__).parent
-    p = Path(path)
-    if p.exists():
-        return str(p)
-    p2 = here / path
-    if p2.exists():
-        return str(p2)
-    raise FileNotFoundError(f"Asset not found: {path}")
-
-# Use in UI (sidebar header, for example)
-try:
-    st.sidebar.image(asset("assets/tchai_logo.png"), width=140)
-except FileNotFoundError as e:
-    st.sidebar.info(str(e))
-def load_tchai_logo_bytes():
-    """Find the logo from stable repo paths first; fall back to /mnt/data."""
-    candidates = [
-        Path("assets/tchai_logo.png"),
-        Path("assets/logo/tchai_logo.png"),
-        Path("tchai_logo.png"),
-        Path("/mnt/data/tchai_logo.png"),  # ephemeral fallback
-    ]
-    for p in candidates:
-        try:
-            if p.exists():
-                return p.read_bytes()
-        except Exception:
-            pass
-    return None
 
 def show_global_logo():
     """Render the logo at the very top of the page (left-aligned)."""
