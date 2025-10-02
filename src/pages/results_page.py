@@ -5,12 +5,63 @@ import pandas as pd
 import streamlit as st
 
 class ResultsPage:
+    
+    # ----------------------------------------------------------------------
+    # 1. NEW: The main public method called by app.py
+    # ----------------------------------------------------------------------
+    @staticmethod
+    def render(R=None):
+        """
+        Public method to render the full Results Page UI.
+        R is the optional results object, if passed.
+        This resolves the AttributeError from app.py.
+        """
+        st.title("🌱 Light-LCA Tool Results")
+        
+        # You can use st.tabs to organize the results content
+        tab1, tab2 = st.tabs(["📊 Key Results", "📄 Export & Report"])
+        
+        with tab1:
+            st.info("Review the key environmental metrics for your project.")
+            
+            # --- Placeholder for Actual Results ---
+            # You should replace this placeholder logic with calls to st.metric, st.dataframe, or st.charts
+            # using data from st.session_state (like overall_co2, comparison_data, etc.)
+            overall_co2 = st.session_state.get("overall_co2")
+            
+            if overall_co2 is not None:
+                st.metric(
+                    label="Overall Carbon Footprint (CO₂e)", 
+                    value=f"{overall_co2:,.2f} kg", 
+                    help="Total calculated Global Warming Potential (GWP)."
+                )
+                # Add your core charts and data displays here!
+                st.subheader("Comparison Data")
+                comparison_data = st.session_state.get("comparison_data", [])
+                df_compare = pd.DataFrame(comparison_data)
+                if not df_compare.empty:
+                    st.dataframe(df_compare, use_container_width=True)
+                else:
+                    st.warning("No comparison data available in session.")
+            else:
+                st.error("Results are not yet available. Please run the calculation first.")
+
+        with tab2:
+            # Call your existing function to handle the report generation and download
+            ResultsPage._render_report_section(R)
+
+    # ----------------------------------------------------------------------
+    # 2. Existing Utility Method
+    # ----------------------------------------------------------------------
     @staticmethod
     def _safe_slug(name: str) -> str:
         # Trim, replace spaces with underscores, and remove unsafe filename chars
         name = (name or "").strip().replace(" ", "_")
         return re.sub(r"[^A-Za-z0-9._-]", "_", name) or "Unnamed_Project"
 
+    # ----------------------------------------------------------------------
+    # 3. Existing Report Method (with minor optimization)
+    # ----------------------------------------------------------------------
     @staticmethod
     def _render_report_section(R):
         """
@@ -19,33 +70,30 @@ class ResultsPage:
         """
         st.markdown("### 📄 Export / Report")
 
-        # -------- Get context from session/R safely --------
-        project_name = st.session_state.get("project_name") or (
-            (R or {}).get("project_name") if isinstance(R, dict) else None
-        )
+        # -------- Get context from session/R safely (Project Name) --------
+        R_dict = R if isinstance(R, dict) else {}
+        project_name = st.session_state.get("project_name") or R_dict.get("project_name")
         project_name = ResultsPage._safe_slug(project_name or "Unnamed_Project")
 
         # final HTML summary (already built in app.py)
         final_summary_html = (
             st.session_state.get("final_summary_html")
-            or ((R or {}).get("final_summary_html") if isinstance(R, dict) else "")
+            or R_dict.get("final_summary_html", "")
         ) or "<h3>No summary available</h3>"
 
         # comparison data (for CSV/JSON export)
-        comparison_data = (
-            st.session_state.get("comparison_data")
-            or ((R or {}).get("comparison_data") if isinstance(R, dict) else [])
-        )
+        comparison_data = st.session_state.get("comparison_data") or R_dict.get("comparison_data", [])
         df_compare = pd.DataFrame(comparison_data) if comparison_data else pd.DataFrame()
 
         # Optional: total numbers
+        TOTAL_KEYS = [
+             "total_material_co2", "total_process_co2", "overall_co2",
+             "weighted_recycled", "trees_equiv", "lifetime_weeks"
+        ]
+        # Optimized: Use dictionary comprehension for cleaner state/dict fallback
         totals = {
-            "total_material_co2": st.session_state.get("total_material_co2", (R or {}).get("total_material_co2") if isinstance(R, dict) else None),
-            "total_process_co2": st.session_state.get("total_process_co2", (R or {}).get("total_process_co2") if isinstance(R, dict) else None),
-            "overall_co2": st.session_state.get("overall_co2", (R or {}).get("overall_co2") if isinstance(R, dict) else None),
-            "weighted_recycled": st.session_state.get("weighted_recycled", (R or {}).get("weighted_recycled") if isinstance(R, dict) else None),
-            "trees_equiv": st.session_state.get("trees_equiv", (R or {}).get("trees_equiv") if isinstance(R, dict) else None),
-            "lifetime_weeks": st.session_state.get("lifetime_weeks", (R or {}).get("lifetime_weeks") if isinstance(R, dict) else None),
+             key: st.session_state.get(key, R_dict.get(key))
+             for key in TOTAL_KEYS
         }
 
         # -------- Report format & filename --------
@@ -57,7 +105,7 @@ class ResultsPage:
 
         file_name = f"TCHAI_Report_{project_name}{report_format}"
 
-        # -------- Build file bytes based on format --------
+        # -------- Build file bytes based on format (No change, as this was excellent) --------
         if report_format == ".html":
             # Wrap the summary HTML in a minimal document
             html_doc = f"""<!doctype html>
