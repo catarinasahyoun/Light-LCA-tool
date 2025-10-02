@@ -212,6 +212,10 @@ class ResultsPage:
         )
 
         st.markdown("### Results Summary")
+        # -- TCHAI Logo (top of Summary) --
+        logo_bytes = load_tchai_logo_bytes()
+        if logo_bytes:
+            st.image(logo_bytes, width=160, use_container_width=False)
 
         # ---- Pull the numbers from session (or fallbacks) ----
         total_material_co2 = float(st.session_state.get("total_material_co2", 0.0) or 0.0)
@@ -223,25 +227,10 @@ class ResultsPage:
         lifetime_years     = max(lifetime_weeks / 52.0, 1e-9)  # avoid div/zero
 
         # ---- Tree equivalent logic (no hard-coded 5 years) ----
-        TREE_SEQUESTRATION_PER_YEAR = 22.0  # kg CO2 per tree per year (simple signal)
+        TREE_CO2_PER_TREE = 22.0  # kg CO2 sequestered per tree (total)
 
-        mode = st.radio(
-            "Tree equivalent basis",
-            options=("Over lifetime", "Per year"),
-            index=0,
-            horizontal=True,
-            key="trees_mode_select",
-            help="Choose whether to express tree equivalent across the design's lifetime or per year.",
-        )
-
-        if mode == "Over lifetime":
-            trees_equiv = overall_co2 / (TREE_SEQUESTRATION_PER_YEAR * lifetime_years)
-            trees_label = f"{trees_equiv:.2f} trees over {lifetime_years:.1f} years"
-            trees_sub   = f"22 kg CO₂/tree/year · lifetime={lifetime_years:.1f} years"
-        else:
-            trees_equiv = overall_co2 / TREE_SEQUESTRATION_PER_YEAR
-            trees_label = f"{trees_equiv:.2f} trees / year"
-            trees_sub   = "22 kg CO₂/tree/year"
+        total_trees_over_lifespan = overall_co2 / TREE_CO2_PER_TREE if overall_co2 > 0 else 0.0
+        trees_per_year = total_trees_over_lifespan / lifetime_years if lifetime_years > 0 else 0.0
 
         # ---- KPI Grid (boxed visuals) ----
         st.markdown('<div class="kpi-grid">', unsafe_allow_html=True)
@@ -295,16 +284,30 @@ class ResultsPage:
         )
 
         # Tree Equivalent (mode-aware)
+        # 🌳 Trees per year
         st.markdown(
             f"""
             <div class="kpi-card">
-              <p class="kpi-title">Tree Equivalent</p>
-              <p class="kpi-value">{trees_label}</p>
-              <div class="kpi-sub">{trees_sub}</div>
+              <p class="kpi-title">🌳 Trees per year</p>
+              <p class="kpi-value">{trees_per_year:.2f}</p>
+              <div class="kpi-sub">{overall_co2:.1f} kg CO₂ total · lifetime = {lifetime_years:.2f} years · 22 kg CO₂/tree</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
+
+        # 🌳 Total trees over lifespan
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+              <p class="kpi-title">🌳 Total trees over lifespan</p>
+              <p class="kpi-value">{total_trees_over_lifespan:.2f}</p>
+              <div class="kpi-sub">Based on 22 kg CO₂ per tree (total)</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
 
         # Lifetime (display signal)
         st.markdown(
