@@ -7,3 +7,4 @@ python-docx==1.1.*      # for DOCX export
 pydantic==2.8.*         # session schema
 docxtpl==0.17.*         # DOCX templating
 docx2pdf        # DOCX to PDF conversion
+boto3
