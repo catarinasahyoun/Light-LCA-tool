@@ -82,7 +82,7 @@ class ResultsPage:
             with col1:
                 fig_co2 = px.bar(
                     df_compare, x="Material", y="CO2e per kg",
-                    color="Material", title="🏭 CO₂e per kg Comparison",
+                    color="Material", title="🏭 CO₂e per kg",
                     color_discrete_sequence=my_color_sequence
                 )
                 fig_co2.update_layout(
@@ -102,7 +102,7 @@ class ResultsPage:
             with col2:
                 fig_recycled = px.bar(
                     df_compare, x="Material", y="Recycled Content (%)",
-                    color="Material", title="♻️ Recycled Content Comparison",
+                    color="Material", title="♻️ Recycled Content ",
                     color_discrete_sequence=my_color_sequence
                 )
                 fig_recycled.update_layout(
@@ -124,7 +124,7 @@ class ResultsPage:
             with col3:
                 fig_circularity = px.bar(
                     df_compare, x="Material", y="Circularity (mapped)",
-                    color="Material", title="🔄 Circularity Comparison",
+                    color="Material", title="🔄 Circularity ",
                     color_discrete_sequence=my_color_sequence
                 )
                 fig_circularity.update_layout(
@@ -154,7 +154,7 @@ class ResultsPage:
             with col4:
                 fig_lifetime = px.bar(
                     df_life, x="Material", y="Lifetime",
-                    color="Material", title="⏱️ Lifetime Comparison",
+                    color="Material", title="⏱️ Lifetime ",
                     color_discrete_sequence=my_color_sequence
                 )
                 fig_lifetime.update_layout(
