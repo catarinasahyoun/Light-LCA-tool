@@ -66,7 +66,6 @@ from src.pages.user_guide_page import UserGuidePage
 from src.pages.settings_page import SettingsPage
 from src.pages.versions_page import VersionsPage
 
-)
 
 
 def main():
