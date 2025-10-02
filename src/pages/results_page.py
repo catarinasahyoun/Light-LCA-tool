@@ -305,18 +305,37 @@ class ResultsPage:
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # ---------- 3) REPORT (third tab; no “Export”) ----------
+    # ---------- 3) REPORT (third tab; DOCX/PDF only, custom title, TCHAI logo) ----------
     @staticmethod
     def _render_report_section(R):
+        import base64
+        from io import BytesIO
+
+        # Optional libraries: python-docx for DOCX; reportlab for PDF (if installed)
+        try:
+            from docx import Document
+            from docx.shared import Pt, Inches
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+        except Exception as e:
+            st.error("Missing dependency: `python-docx` is required to export DOCX reports.")
+            return
+
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.pdfgen import canvas
+            from reportlab.lib.units import inch
+            REPORTLAB_AVAILABLE = True
+        except Exception:
+            REPORTLAB_AVAILABLE = False
+
         st.markdown("### Report")
 
-        # Project name
+        # ---------- gather data ----------
         project_name = st.session_state.get("project_name") or (
             (R or {}).get("project_name") if isinstance(R, dict) else None
         )
         project_name = ResultsPage._safe_slug(project_name or "Unnamed_Project")
 
-        # Pull data to include in exports
         final_summary_html = (
             st.session_state.get("final_summary_html")
             or ((R or {}).get("final_summary_html") if isinstance(R, dict) else "")
@@ -326,85 +345,208 @@ class ResultsPage:
             st.session_state.get("comparison_data")
             or ((R or {}).get("comparison_data") if isinstance(R, dict) else [])
         )
-        df_compare = pd.DataFrame(comparison_data) if comparison_data else pd.DataFrame()
 
         totals = {
-            "total_material_co2": st.session_state.get(
-                "total_material_co2",
-                (R or {}).get("total_material_co2") if isinstance(R, dict) else None,
-            ),
-            "total_process_co2": st.session_state.get(
-                "total_process_co2",
-                (R or {}).get("total_process_co2") if isinstance(R, dict) else None,
-            ),
-            "overall_co2": st.session_state.get(
-                "overall_co2",
-                (R or {}).get("overall_co2") if isinstance(R, dict) else None,
-            ),
-            "weighted_recycled": st.session_state.get(
-                "weighted_recycled",
-                (R or {}).get("weighted_recycled") if isinstance(R, dict) else None,
-            ),
-            "trees_equiv": st.session_state.get(
-                "trees_equiv",
-                (R or {}).get("trees_equiv") if isinstance(R, dict) else None,
-            ),
-            "lifetime_weeks": st.session_state.get(
-                "lifetime_weeks",
-                (R or {}).get("lifetime_weeks") if isinstance(R, dict) else None,
-            ),
+            "total_material_co2": st.session_state.get("total_material_co2"),
+            "total_process_co2": st.session_state.get("total_process_co2"),
+            "overall_co2": st.session_state.get("overall_co2"),
+            "weighted_recycled": st.session_state.get("weighted_recycled"),
+            "trees_equiv": st.session_state.get("trees_equiv"),
+            "lifetime_weeks": st.session_state.get("lifetime_weeks"),
         }
 
-        # Choose format (keep your selectbox)
-        report_format = st.selectbox(
-            "Choose report format", [".html", ".json", ".csv"], index=0, key="report_format_select"
-        )
-        # Normalize extension to start with "."
-        if report_format and not report_format.startswith("."):
-            report_format = f".{report_format}"
+        # ---------- UI controls: title + format ----------
+        default_title = f"TCHAI Report — {project_name}"
+        report_title = st.text_input("Report title", value=default_title, key="report_title_input")
 
-        file_name = f"TCHAI_Report_{project_name}{report_format}"
+        fmt_options = ["DOCX (.docx)"] + (["PDF (.pdf)"] if REPORTLAB_AVAILABLE else [])
+        report_choice = st.selectbox("Format", fmt_options, index=0, key="report_format_choice")
 
-        # Build payload
-        if report_format == ".html":
-            html_doc = f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>TCHAI Report — {project_name}</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-</head>
-<body>
-{final_summary_html}
-<hr>
-<section>
-<h3>Data (JSON)</h3>
-<pre>{json.dumps({"project_name": project_name, "totals": totals, "comparison_data": comparison_data}, indent=2)}</pre>
-</section>
-</body>
-</html>"""
-            data_bytes = html_doc.encode("utf-8")
-            mime = "text/html"
+        if not REPORTLAB_AVAILABLE:
+            st.caption("To enable PDF export, install `reportlab` in your environment.")
 
-        elif report_format == ".json":
-            payload = {
-                "project_name": project_name,
-                "totals": totals,
-                "comparison_data": comparison_data,
-                "final_summary_html": final_summary_html,
-            }
-            data_bytes = json.dumps(payload, indent=2).encode("utf-8")
-            mime = "application/json"
+        # ---------- locate logo (try a few common paths) ----------
+        def _load_logo_bytes():
+            candidate_paths = [
+                "assets/logo/tchai_logo.png",            # your repo path if you have one
+                "assets/tchai_logo.png",
+                "tchai_logo.png",
+                "/mnt/data/tchai_logo.png",              # provided path from your environment
+            ]
+            for p in candidate_paths:
+                try:
+                    with open(p, "rb") as f:
+                        return f.read()
+                except Exception:
+                    continue
+            return None
 
-        else:  # ".csv"
-            if df_compare.empty:
-                df_compare = pd.DataFrame([{"note": "No comparison data available"}])
-            buf = io.StringIO()
-            df_compare.to_csv(buf, index=False)
-            data_bytes = buf.getvalue().encode("utf-8")
-            mime = "text/csv"
+        logo_bytes = _load_logo_bytes()
 
-        # Download button
+        # ---------- builders ----------
+        def build_docx() -> bytes:
+            doc = Document()
+            sec = doc.sections[0]
+            sec.top_margin = Inches(0.75)
+            sec.bottom_margin = Inches(0.75)
+            sec.left_margin = Inches(0.75)
+            sec.right_margin = Inches(0.75)
+
+            # Logo header
+            if logo_bytes:
+                tmp = BytesIO(logo_bytes)
+                try:
+                    doc.add_picture(tmp, width=Inches(1.4))
+                    last = doc.paragraphs[-1]
+                    last.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                except Exception:
+                    pass
+
+            # Title
+            p = doc.add_paragraph()
+            run = p.add_run(report_title)
+            run.bold = True
+            run.font.size = Pt(20)
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+            # Project
+            p2 = doc.add_paragraph()
+            r2 = p2.add_run(f"Project: {project_name}")
+            r2.font.size = Pt(11)
+
+            # Divider
+            doc.add_paragraph("")  # spacer
+
+            # KPIs block
+            doc.add_paragraph("Key Figures").runs[0].bold = True
+            kpi = doc.add_table(rows=0, cols=2)
+            kpi.style = "Light Grid"
+            def add_row(lbl, val):
+                row = kpi.add_row().cells
+                row[0].text = lbl
+                row[1].text = val
+
+            def fmt(v, unit="kg"):
+                return f"{v:.2f} {unit}"
+
+            if totals["total_material_co2"] is not None:
+                add_row("Total CO₂ — Materials", fmt(float(totals["total_material_co2"])))
+            if totals["total_process_co2"] is not None:
+                add_row("Total CO₂ — Processes", fmt(float(totals["total_process_co2"])))
+            if totals["overall_co2"] is not None:
+                add_row("Overall CO₂", fmt(float(totals["overall_co2"])))
+            if totals["weighted_recycled"] is not None:
+                add_row("Weighted Recycled Content", f"{float(totals['weighted_recycled']):.1f} %")
+            if totals["lifetime_weeks"] is not None:
+                yrs = float(totals["lifetime_weeks"]) / 52.0
+                add_row("Lifetime", f"{int(totals['lifetime_weeks'])} weeks ({yrs:.1f} years)")
+
+            doc.add_paragraph("")  # spacer
+
+            # Comparison table (compact)
+            if comparison_data:
+                doc.add_paragraph("Comparison Data (excerpt)").runs[0].bold = True
+                df = pd.DataFrame(comparison_data)
+                # Limit columns to the most relevant if present
+                cols_pref = ["Material", "CO2e per kg", "Recycled Content (%)", "Circularity (mapped)", "Lifetime (years)"]
+                cols_show = [c for c in cols_pref if c in df.columns] or list(df.columns)[:5]
+                df = df[cols_show].copy()
+
+                table = doc.add_table(rows=1, cols=len(cols_show))
+                hdr_cells = table.rows[0].cells
+                for j, col in enumerate(cols_show):
+                    hdr_cells[j].text = str(col)
+
+                for _, row in df.iterrows():
+                    cells = table.add_row().cells
+                    for j, col in enumerate(cols_show):
+                        cells[j].text = str(row[col])
+
+                doc.add_paragraph("")  # spacer
+
+            # Notes / HTML summary as plain text
+            doc.add_paragraph("Notes").runs[0].bold = True
+            # Strip tags for plain insertion
+            plain_summary = re.sub("<[^<]+?>", "", final_summary_html or "")
+            doc.add_paragraph(plain_summary or "—")
+
+            # Save to bytes
+            buf = BytesIO()
+            doc.save(buf)
+            return buf.getvalue()
+
+        def build_pdf() -> bytes:
+            buf = BytesIO()
+            c = canvas.Canvas(buf, pagesize=A4)
+            width, height = A4
+            x_margin = 50
+            y = height - 60
+
+            # Logo
+            if logo_bytes:
+                try:
+                    from reportlab.lib.utils import ImageReader
+                    img = ImageReader(BytesIO(logo_bytes))
+                    c.drawImage(img, x_margin, y - 40, width=100, preserveAspectRatio=True, mask='auto')
+                except Exception:
+                    pass
+
+            # Title
+            c.setFont("Helvetica-Bold", 16)
+            c.drawString(x_margin, y - 70, report_title)
+
+            # Project
+            c.setFont("Helvetica", 10)
+            c.drawString(x_margin, y - 90, f"Project: {project_name}")
+
+            # KPIs
+            y_kpi = y - 120
+            c.setFont("Helvetica-Bold", 12)
+            c.drawString(x_margin, y_kpi, "Key Figures")
+            c.setFont("Helvetica", 10)
+            y_kpi -= 16
+
+            def draw_kpi(lbl, val):
+                nonlocal y_kpi
+                c.drawString(x_margin, y_kpi, f"{lbl}: {val}")
+                y_kpi -= 14
+
+            def fmt(v, unit="kg"):
+                return f"{v:.2f} {unit}"
+
+            if totals["total_material_co2"] is not None:
+                draw_kpi("Total CO₂ — Materials", fmt(float(totals["total_material_co2"])))
+            if totals["total_process_co2"] is not None:
+                draw_kpi("Total CO₂ — Processes", fmt(float(totals["total_process_co2"])))
+            if totals["overall_co2"] is not None:
+                draw_kpi("Overall CO₂", fmt(float(totals["overall_co2"])))
+            if totals["weighted_recycled"] is not None:
+                draw_kpi("Weighted Recycled Content", f"{float(totals['weighted_recycled']):.1f} %")
+            if totals["lifetime_weeks"] is not None:
+                yrs = float(totals["lifetime_weeks"]) / 52.0
+                draw_kpi("Lifetime", f"{int(totals['lifetime_weeks'])} weeks ({yrs:.1f} years)")
+
+            # Footer
+            c.setFont("Helvetica-Oblique", 8)
+            c.drawRightString(width - x_margin, 30, "Generated with TCHAI LCA Tool")
+
+            c.showPage()
+            c.save()
+            return buf.getvalue()
+
+        # ---------- build + download ----------
+        if report_choice.startswith("DOCX"):
+            data_bytes = build_docx()
+            file_name = f"{ResultsPage._safe_slug(report_title)}.docx"
+            mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        else:  # PDF
+            if not REPORTLAB_AVAILABLE:
+                st.error("PDF export is not available because `reportlab` is not installed.")
+                return
+            data_bytes = build_pdf()
+            file_name = f"{ResultsPage._safe_slug(report_title)}.pdf"
+            mime = "application/pdf"
+
         st.download_button(
             label=f"⬇️ Download {file_name}",
             data=data_bytes,
@@ -413,23 +555,9 @@ class ResultsPage:
             use_container_width=True,
         )
 
-        # Debug info (helpful while wiring)
+        # Debug (optional)
         with st.expander("🔎 Debug details"):
-            st.write("**Filename:**", file_name)
-            st.write("**Project Name (sanitized):**", project_name)
-            st.write("**Totals keys present:**", [k for k, v in totals.items() if v is not None])
-            st.write("**Comparison rows:**", len(df_compare))
-
-    # ---------- helper: show what’s missing ----------
-    @staticmethod
-    def _show_missing_hint(required_keys):
-        missing = [k for k in required_keys if not st.session_state.get(k)]
-        if missing:
-            st.warning(
-                "No results found in session. The following keys are missing in `st.session_state`: "
-                + ", ".join(missing)
-                + ".\n\n"
-                "Make sure your **Tool/Inputs** page sets these before visiting Results."
-            )
-        else:
-            st.info("Nothing to display yet. Please run the Tool/Inputs page first.")
+            st.write("**Chosen title:**", report_title)
+            st.write("**Format:**", report_choice)
+            st.write("**Has logo:**", logo_bytes is not None)
+            st.write("**Project:**", project_name)
