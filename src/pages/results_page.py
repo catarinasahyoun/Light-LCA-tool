@@ -311,19 +311,23 @@ class ResultsPage:
     @staticmethod
     def _render_report_section(R):
         """
-        Export a report that follows the Tchai template:
+        Builds a Tchai-styled report with your exact reference text:
         - Cover with logo + title + date
-        - Introduction (from text brief)
-        - Golden Rules & Must-Haves
-        - Methodology
-        - Results KPIs
-        - Material Comparison Overview
-        - Conclusion
-        Formats: DOCX (always) and PDF (if reportlab is installed)
+        - Introduction (verbatim)
+        - Different tracks, shared direction
+        - Criteria bullets
+        - Materials Included in the Analysis (from selected materials)
+        - Considerations and Scope (verbatim)
+        - Material Comparison Overview (table)
+        - Conclusion (verbatim)
+        Outputs: DOCX (always) and PDF (if `reportlab` installed)
         """
-        import re
+        import io, re, textwrap
+        from io import BytesIO
+        import pandas as pd
+        import streamlit as st
 
-        # --- deps ---
+        # ---- deps for DOCX/PDF ----
         try:
             from docx import Document
             from docx.shared import Pt, Inches
@@ -343,61 +347,67 @@ class ResultsPage:
 
         st.markdown("### Report")
 
-        # ---------- static text pulled from your docs (curated & concise) ----------
+        # ---------- verbatim text (from your reference) ----------
         INTRO_TEXT = (
-            "At Tchai we build different. Our Easy LCA tool helps us see the footprint of a concept "
-            "before it’s built—so we can adjust, swap, or simplify. This report shares early-stage, "
-            "directional indicators (materials, processes, end-of-life) to support better decisions."
+            "At Tchai we build differen: within every brand space we design we try to leave a "
+            "positive mark on people and planet. Our Easy LCA tool helps us see the real footprint "
+            "of a concept before it’s built: materials, transport, end of life. With those numbers "
+            "we can adjust, swap, or simplify. By 2030 we want every solution we deliver to have a "
+            "clear, positive influence. Tracking impact now is a practical step toward that goal."
         )
 
-        GOLDEN_RULES = [
-            "Think circular — plan reuse, modularity and end-of-life from day one.",
-            "Start light — run LCA-Light in briefing/concept to steer choices early.",
-            "Choose smart materials — prefer recycled/recyclable, FSC/PEFC.",
-            "Cut waste — simplify parts/finishes/packaging; avoid over-engineering.",
-            "Design for disassembly — standard fasteners; clear material separation.",
+        TRACKS_TEXT = (
+            "Different tracks, shared direction: sustainability\n"
+            "Within every design process, we aim to integrate sustainability as early and as broadly as possible. "
+            "We deliberately take a wide-angle approach: to us, sustainability is the result of a series of choices "
+            "and trade-offs, not a one-size-fits-all solution. For some organizations, the focus lies on CO2e emissions; "
+            "for others, it's on circularity, reuse, or social responsibility. We believe that each organization follows "
+            "its own sustainability journey.\n"
+            "At this conceptual stage, we used a consistent design to evaluate each material’s environmental impact based on the following criteria:"
+        )
+
+        CRITERIA_BULLETS = [
+            "CO2e emissions per unit (calculated over a projects lifespan)",
+            "Recycled content (% of recycled vs. virgin material)",
+            "Circularity potential (reusability, reparability, modularity)",
+            "End-of-life considerations",
         ]
 
-        MUST_HAVES = {
-            "Materials": [
-                "FSC/PEFC wood; sustainable MDF where feasible",
-                "Water-based paints / low-VOC adhesives",
-                "Avoid PVC/problematic plastics where possible",
-                "High recycled content where quality allows",
-            ],
-            "Design & Build": [
-                "Modular & repairable assemblies",
-                "Avoid mixed-material laminates that block recycling",
-                "Label parts for sorting (material codes)",
-                "Standardize repeat parts across programs",
-            ],
-            "Process & Logistics": [
-                "Run LCA-Light before locking specs",
-                "Transport-efficient (flat-pack, stackable, lighter)",
-                "Source locally when it truly reduces impact",
-                "Plan end-of-life (reuse/recycle routes documented)",
-            ],
-        }
-
-        METHODOLOGY_TEXT = (
-            "Scope includes materials and processes with a mass-weighted recycled content signal, "
-            "plus a qualitative circularity cue. Tree-equivalent is a simple signal using 22 kg CO₂ "
-            "sequestration per tree per year. Transport and social criteria are excluded at this stage."
+        CONSIDERATIONS_SCOPE = (
+            "Beyond environmental metrics, material selection was guided by expected lifespan, durability, and resistance "
+            "to vandalism. While these are not directly reflected in CO2e calculations, they significantly impact long-term "
+            "performance and suitability.\n"
+            "Transport emissions were excluded from this stage, as they depend on future decisions such as supplier and "
+            "production location. Should we be involved in the production phase, these will be included in the final LCA.\n"
+            "This comparison is indicative, aiming to generate early insight into the environmental implications of material "
+            "choices, focusing solely on environmental aspects.\n"
+            "Social criteria like working conditions and human rights, while not part of this assessment, are essential to "
+            "our approach. At Tchai, we only collaborate with suppliers who uphold high standards of ethics, transparency, and "
+            "labor rights.\n"
+            "This methodology supports better-informed early decisions and promotes meaningful, well-rounded discussions "
+            "about sustainability."
         )
 
         CONCLUSION_TEXT = (
-            "Not every improvement shows up in a CO₂e score. Each option has trade-offs; the win is "
-            "combining insights to shape a smarter, more sustainable design. This indicator report "
-            "guides early decisions; a full LCA can follow for official claims."
+            "Conclusion: Sustainability That Goes Beyond the Numbers\n"
+            "Not every improvement appears in a CO2e score, but that doesn’t make it less important. This comparison doesn’t "
+            "point to a single perfect material, and that’s the point. Each option presents distinct strengths and trade-offs. "
+            "The real opportunity lies in combining these insights to shape a smarter, more sustainable design.\n"
+            "The final design will likely use a mix of materials, balancing functionality, durability, and environmental impact. "
+            "This analysis provides the foundation for that design process.\n"
+            "Ultimately, the goal isn’t just to reduce numbers, but to pursue meaningful sustainability: selecting materials "
+            "that perform well both environmentally and practically over time. These are not just optimizations for today, but "
+            "decisions made with long-term responsibility in mind."
         )
 
-        # ---------- gather data ----------
-        project_name = st.session_state.get("project_name") or (
-            (R or {}).get("project_name") if isinstance(R, dict) else None
-        )
+        # ---------- gather dynamic data ----------
         def _safe_slug(name: str) -> str:
             name = (name or "").strip().replace(" ", "_")
             return re.sub(r"[^A-Za-z0-9._-]", "_", name) or "Unnamed_Project"
+
+        project_name = st.session_state.get("project_name") or (
+            (R or {}).get("project_name") if isinstance(R, dict) else None
+        )
         project_slug = _safe_slug(project_name or "Unnamed_Project")
 
         comparison_data = (
@@ -406,7 +416,7 @@ class ResultsPage:
         )
         df_compare = pd.DataFrame(comparison_data) if comparison_data else pd.DataFrame()
 
-        eol_summary = st.session_state.get("eol_summary", {})  # {material: EoL text}
+        eol_summary = st.session_state.get("eol_summary", {})  # {material: EoL}
         totals = {
             "total_material_co2": float(st.session_state.get("total_material_co2") or 0.0),
             "total_process_co2":  float(st.session_state.get("total_process_co2") or 0.0),
@@ -415,6 +425,9 @@ class ResultsPage:
             "lifetime_weeks":     int(st.session_state.get("lifetime_weeks") or 52),
         }
         lifetime_years = max(totals["lifetime_weeks"] / 52.0, 1e-9)
+
+        # Unique materials list for “Materials Included…”
+        material_list = sorted(df_compare["Material"].dropna().unique().tolist()) if "Material" in df_compare else []
 
         # ---------- UI controls ----------
         default_title = f"Easy LCA Tool Report — {project_slug}"
@@ -428,10 +441,11 @@ class ResultsPage:
         # ---------- logo loader ----------
         def _load_logo():
             for p in [
-                "/mnt/data/tchai_logo.png",    # provided path
+                "/mnt/data/tchai_logo.png",
                 "assets/logo/tchai_logo.png",
                 "assets/tchai_logo.png",
                 "tchai_logo.png",
+                "/mnt/data/516855fb-161c-4e3d-9eb8-b5d287df9507.png",  # fallback (the image you sent)
             ]:
                 try:
                     with open(p, "rb") as f:
@@ -439,20 +453,20 @@ class ResultsPage:
                 except Exception:
                     continue
             return None
+
         logo_bytes = _load_logo()
 
         # ---------- helpers ----------
-        def _docx_heading(doc, text, level=1):
+        def _docx_heading(doc, text, size=14, bold=True):
             p = doc.add_paragraph()
-            run = p.add_run(text)
-            run.bold = True
-            run.font.size = Pt(14 if level == 1 else 12)
+            r = p.add_run(text)
+            r.bold = bold
+            r.font.size = Pt(size)
             return p
 
         def _docx_bullets(doc, items):
             for it in items:
                 para = doc.add_paragraph(style=None)
-                para_format = para.paragraph_format
                 run = para.add_run(f"• {it}")
                 run.font.size = Pt(11)
 
@@ -480,29 +494,34 @@ class ResultsPage:
             title_p.alignment = WD_ALIGN_PARAGRAPH.LEFT
             meta = doc.add_paragraph(f"Project: {project_name or project_slug}   ·   Date: {pd.Timestamp.now():%Y-%m-%d}")
             meta.alignment = WD_ALIGN_PARAGRAPH.LEFT
-            doc.add_paragraph("")  # spacer
+            doc.add_paragraph("")
 
-            # Introduction
-            _docx_heading(doc, "Introduction", level=1)
+            # Introduction (verbatim)
+            _docx_heading(doc, "Introduction", size=14)
             doc.add_paragraph(INTRO_TEXT)
 
-            # Golden Rules & Must-Haves
-            _docx_heading(doc, "Tchai Conscious Standard", level=1)
-            doc.add_paragraph("5 Golden Rules")
-            _docx_bullets(doc, GOLDEN_RULES)
-            doc.add_paragraph("")  # spacer
-            doc.add_paragraph("12 Must-Haves")
-            for section, bullets in MUST_HAVES.items():
-                doc.add_paragraph(section).runs[0].bold = True
-                _docx_bullets(doc, bullets)
+            # Tracks + Criteria
+            _docx_heading(doc, "Different tracks, shared direction: sustainability", size=13)
+            for para in TRACKS_TEXT.split("\n"):
+                if para.strip():
+                    doc.add_paragraph(para.strip())
+            _docx_bullets(doc, CRITERIA_BULLETS)
 
-            # Methodology
-            _docx_heading(doc, "Methodology", level=1)
-            doc.add_paragraph(f"Lifespan set: {totals['lifetime_weeks']} weeks ({lifetime_years:.1f} years).")
-            doc.add_paragraph(METHODOLOGY_TEXT)
+            # Materials Included in the Analysis
+            _docx_heading(doc, "Materials Included in the Analysis", size=13)
+            if material_list:
+                _docx_bullets(doc, [m for m in material_list])
+            else:
+                doc.add_paragraph("—")
 
-            # KPIs
-            _docx_heading(doc, "Results Summary", level=1)
+            # Considerations and Scope (verbatim)
+            _docx_heading(doc, "Considerations and Scope", size=13)
+            for para in CONSIDERATIONS_SCOPE.split("\n"):
+                if para.strip():
+                    doc.add_paragraph(para.strip())
+
+            # KPIs (quick summary block)
+            _docx_heading(doc, "Results Summary (Key Figures)", size=13)
             tbl = doc.add_table(rows=0, cols=2)
             tbl.alignment = WD_TABLE_ALIGNMENT.LEFT
             tbl.style = "Light Grid"
@@ -514,43 +533,58 @@ class ResultsPage:
             add_kpi("Total CO₂ — Materials", f"{totals['total_material_co2']:.2f} kg")
             add_kpi("Total CO₂ — Processes", f"{totals['total_process_co2']:.2f} kg")
             add_kpi("Overall CO₂", f"{totals['overall_co2']:.2f} kg")
-            add_kpi("Tree-Equivalent (signal)",
-                    f"{(totals['overall_co2']/(22.0*lifetime_years)):.2f} trees over {lifetime_years:.1f} years")
+            add_kpi("Tree Equivalent*", f"{(totals['overall_co2']/(22.0*lifetime_years)):.2f} trees over {lifetime_years:.1f} years")
+            doc.add_paragraph("*Estimated number of trees required to sequester the CO₂e emissions over the project lifespan.")
 
-            # Material Comparison Overview
-            _docx_heading(doc, "Material Comparison Overview", level=1)
-            # Decide columns to show
-            cols_pref = ["Material", "CO2e per kg", "Recycled Content (%)", "Circularity (mapped)", "Lifetime (years)"]
-            cols_show = [c for c in cols_pref if c in df_compare.columns]
-            extra_eol = bool(eol_summary)
-            ncols = len(cols_show) + (1 if extra_eol else 0)
-            if ncols == 0:
-                doc.add_paragraph("No comparison data available.")
-            else:
-                table = doc.add_table(rows=1, cols=ncols)
-                table.style = "Light Grid"
-                hdr_cells = table.rows[0].cells
-                for j, col in enumerate(cols_show):
-                    hdr_cells[j].text = col
-                if extra_eol:
-                    hdr_cells[len(cols_show)].text = "End-of-Life"
-                for _, row in df_compare.iterrows():
-                    mat = row.get("Material", "")
-                    cells = table.add_row().cells
-                    for j, col in enumerate(cols_show):
-                        cells[j].text = str(row.get(col, ""))
-                    if extra_eol:
-                        cells[len(cols_show)].text = str(eol_summary.get(mat, ""))
+            # Material Comparison Overview (table)
+            _docx_heading(doc, "Material Comparison Overview", size=13)
+            # Columns required by your reference table
+            cols = ["Material", "CO2e per Unit (kg CO2e)", "Avg. Recycled Content", "Circularity", "End-of-Life", "Tree Equivalent*"]
+            table = doc.add_table(rows=1, cols=len(cols))
+            table.style = "Light Grid"
+            hdr = table.rows[0].cells
+            for j, col in enumerate(cols):
+                hdr[j].text = col
 
-            # Conclusion
-            _docx_heading(doc, "Conclusion", level=1)
-            doc.add_paragraph(CONCLUSION_TEXT)
+            # Map from df_compare (best-effort)
+            # We derive:
+            # - CO2e per Unit from "CO2e per kg" if present (unit=kg)
+            # - Avg. Recycled Content from "Recycled Content (%)"
+            # - Circularity from either "Circularity (mapped)" or "Circularity (text)"
+            # - End-of-Life from eol_summary
+            # - Tree Equivalent per unit = (CO2e per unit) / (22 * lifetime_years)
+            for _, row in (df_compare if not df_compare.empty else pd.DataFrame(columns=["Material"])).iterrows():
+                mat = str(row.get("Material", ""))
+                co2_per_unit = float(row.get("CO2e per kg", 0.0) or 0.0)  # treating 1 unit = 1 kg
+                rec = row.get("Recycled Content (%)", "")
+                circ = row.get("Circularity (text)", row.get("Circularity (mapped)", ""))
+                eol = eol_summary.get(mat, "")
+                tree_eq_unit = (co2_per_unit / (22.0 * lifetime_years)) if lifetime_years > 0 else 0.0
+
+                cells = table.add_row().cells
+                cells[0].text = mat
+                cells[1].text = f"{co2_per_unit:.2f}"
+                cells[2].text = f"{rec}" if rec == "" else f"{float(rec):.1f}%"
+                cells[3].text = str(circ)
+                cells[4].text = str(eol)
+                cells[5].text = f"{tree_eq_unit:.2f}"
+
+            if df_compare.empty:
+                row = table.add_row().cells
+                row[0].text = "—"
+                for j in range(1, len(cols)):
+                    row[j].text = ""
+
+            # Conclusion (verbatim)
+            for para in CONCLUSION_TEXT.split("\n"):
+                if para.strip():
+                    doc.add_paragraph(para.strip())
 
             out = io.BytesIO()
             doc.save(out)
             return out.getvalue()
 
-        # ---------- simple PDF builder (one page summary) ----------
+        # ---------- PDF builder (one-page summary with your intro) ----------
         def build_pdf() -> bytes:
             buf = io.BytesIO()
             c = canvas.Canvas(buf, pagesize=A4)
@@ -564,7 +598,7 @@ class ResultsPage:
                 c.drawString(x, y, text)
                 y -= dy
 
-            # logo + title
+            # Logo + Title
             if logo_bytes:
                 try:
                     c.drawImage(ImageReader(io.BytesIO(logo_bytes)), x, y-35, width=110, preserveAspectRatio=True, mask='auto')
@@ -573,21 +607,22 @@ class ResultsPage:
             line(report_title, size=16, dy=22, bold=True); y -= 6
             line(f"Project: {project_name or project_slug}   ·   Date: {pd.Timestamp.now():%Y-%m-%d}", size=9, dy=16)
 
-            # intro
+            # Introduction (wrap)
             line("Introduction", bold=True, dy=18)
-            for chunk in text_wrap(INTRO_TEXT, width=92) if hasattr(st, "text_wrap") else [INTRO_TEXT]:
+            for chunk in textwrap.wrap(INTRO_TEXT, width=92):
                 line(chunk, size=9, dy=12)
 
-            # KPIs
+            # Results quick KPIs
             y -= 6
-            line("Results Summary", bold=True, dy=18)
+            line("Results Summary (Key Figures)", bold=True, dy=18)
             line(f"Weighted Recycled Content: {totals['weighted_recycled']:.1f} %", size=9)
             line(f"Total CO₂ — Materials: {totals['total_material_co2']:.2f} kg", size=9)
             line(f"Total CO₂ — Processes: {totals['total_process_co2']:.2f} kg", size=9)
             line(f"Overall CO₂: {totals['overall_co2']:.2f} kg", size=9)
-            line(f"Tree-Equivalent (signal): {(totals['overall_co2']/(22.0*lifetime_years)):.2f} trees over {lifetime_years:.1f} years", size=9)
+            line(f"Tree Equivalent*: {(totals['overall_co2']/(22.0*lifetime_years)):.2f} trees over {lifetime_years:.1f} years", size=9)
+            line("*Estimated number of trees required to sequester the CO₂e emissions over the project lifespan.", size=7, dy=10)
 
-            # footer
+            # Footer
             c.setFont("Helvetica-Oblique", 8)
             c.drawRightString(w-40, 28, "Generated with TCHAI Easy LCA Tool")
             c.showPage(); c.save()
