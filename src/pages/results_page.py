@@ -3,45 +3,63 @@ import re
 import json
 import pandas as pd
 import streamlit as st
-import plotly.express as px  # needed for the charts
+import plotly.express as px  # for charts
 
 class ResultsPage:
     @staticmethod
     def _safe_slug(name: str) -> str:
-        # Trim, replace spaces with underscores, and remove unsafe filename chars
         name = (name or "").strip().replace(" ", "_")
         return re.sub(r"[^A-Za-z0-9._-]", "_", name) or "Unnamed_Project"
 
     @staticmethod
     def render():
         """Public entry point used by app.py"""
-        ResultsPage._render_summary_section()
-        ResultsPage._render_charts_section()
-        ResultsPage._render_report_section(R=None)
+        # Tabs in your requested order/titles
+        tab_comp, tab_summary, tab_report = st.tabs([
+            "📊 Comparison & Visualizations",
+            "🧾 Results Summary",
+            "📄 Report",
+        ])
 
-    # ---------- 1) SUMMARY (pretty HTML generated upstream) ----------
-    @staticmethod
-    def _render_summary_section():
-        st.markdown("## 🧾 Results Summary")
-        final_summary_html = st.session_state.get("final_summary_html", "")
-        if final_summary_html:
-            st.markdown(final_summary_html, unsafe_allow_html=True)
-        else:
-            st.info("No summary available yet. Go to the Inputs/Tool page, complete the assessment, and generate results.")
+        with tab_comp:
+            ResultsPage._render_charts_section()
 
-    # ---------- 2) COMPARISON VISUALIZATIONS (same structure as before) ----------
+        with tab_summary:
+            ResultsPage._render_summary_section()
+
+        with tab_report:
+            ResultsPage._render_report_section(R=None)
+
+    # ---------- 1) COMPARISON & VISUALIZATIONS (first tab) ----------
     @staticmethod
     def _render_charts_section():
-        st.markdown("## 📊 Comparison Visualizations")
+        st.markdown("### Comparison & Visualizations")
 
+        # Expect list[dict] like in your original app
         comparison_data = st.session_state.get("comparison_data", [])
         if not comparison_data:
-            st.info("No comparison data found. After entering materials/processes on the Inputs page, return here.")
+            ResultsPage._show_missing_hint(["comparison_data"])
             return
 
         df_compare = pd.DataFrame(comparison_data)
 
-        # Helper: add lifetime category like your original code
+        # Ensure expected columns exist
+        expected_cols = {
+            "Material",
+            "CO2e per kg",
+            "Recycled Content (%)",
+            "Circularity (mapped)",
+            "Lifetime (years)",
+        }
+        missing_cols = [c for c in expected_cols if c not in df_compare.columns]
+        if missing_cols:
+            st.warning(
+                "The comparison dataset is missing columns: "
+                + ", ".join(missing_cols)
+                + ". Please check the Tool page logic that builds `comparison_data`."
+            )
+
+        # Helper: lifetime category
         def lifetime_category(lifetime_value):
             try:
                 v = float(lifetime_value)
@@ -54,20 +72,13 @@ class ResultsPage:
             else:
                 return "Long"
 
-        # If these columns exist, mirror the original visuals
-        # Colors similar to your original theme
         my_color_sequence = ['#2E7D32', '#388E3C', '#4CAF50', '#66BB6A', '#81C784']
 
-        # Safeguards for missing columns
-        # Expected: "Material", "CO2e per kg", "Recycled Content (%)",
-        # "Circularity (mapped)", "Circularity (text)", "Lifetime (years)"
-        available_cols = set(df_compare.columns)
-
-        # Layout containers
+        # Two rows of charts, like before
         col1, col2 = st.columns(2)
 
         # (A) CO2e per kg
-        if {"Material", "CO2e per kg"}.issubset(available_cols):
+        if {"Material", "CO2e per kg"}.issubset(df_compare.columns):
             with col1:
                 fig_co2 = px.bar(
                     df_compare, x="Material", y="CO2e per kg",
@@ -87,7 +98,7 @@ class ResultsPage:
                 st.info("Missing columns for CO₂e chart (need: Material, CO2e per kg).")
 
         # (B) Recycled Content
-        if {"Material", "Recycled Content (%)"}.issubset(available_cols):
+        if {"Material", "Recycled Content (%)"}.issubset(df_compare.columns):
             with col2:
                 fig_recycled = px.bar(
                     df_compare, x="Material", y="Recycled Content (%)",
@@ -109,7 +120,7 @@ class ResultsPage:
         col3, col4 = st.columns(2)
 
         # (C) Circularity
-        if {"Material", "Circularity (mapped)"}.issubset(available_cols):
+        if {"Material", "Circularity (mapped)"}.issubset(df_compare.columns):
             with col3:
                 fig_circularity = px.bar(
                     df_compare, x="Material", y="Circularity (mapped)",
@@ -134,8 +145,7 @@ class ResultsPage:
                 st.info("Missing columns for Circularity chart (need: Material, Circularity (mapped)).")
 
         # (D) Lifetime (Short/Medium/Long)
-        # Recreate the category column if needed
-        if "Lifetime (years)" in available_cols:
+        if "Lifetime (years)" in df_compare.columns and "Material" in df_compare.columns:
             df_life = df_compare.copy()
             df_life["Lifetime Category"] = df_life["Lifetime (years)"].apply(lifetime_category)
             lifetime_cat_to_num = {"Short": 1, "Medium": 2, "Long": 3}
@@ -164,13 +174,20 @@ class ResultsPage:
             with col4:
                 st.info("Missing column for Lifetime chart (need: Lifetime (years)).")
 
-    # ---------- 3) EXPORT / REPORT (safe filename + formats) ----------
+    # ---------- 2) RESULTS SUMMARY (second tab) ----------
+    @staticmethod
+    def _render_summary_section():
+        st.markdown("### Results Summary")
+        final_summary_html = st.session_state.get("final_summary_html", "")
+        if final_summary_html:
+            st.markdown(final_summary_html, unsafe_allow_html=True)
+        else:
+            ResultsPage._show_missing_hint(["final_summary_html"])
+
+    # ---------- 3) REPORT (third tab; no “Export”) ----------
     @staticmethod
     def _render_report_section(R):
-        """
-        R is optional dict with results; we rely primarily on st.session_state.
-        """
-        st.markdown("## 📄 Export / Report")
+        st.markdown("### Report")
 
         # Project name
         project_name = st.session_state.get("project_name") or (
@@ -279,5 +296,19 @@ class ResultsPage:
         with st.expander("🔎 Debug details"):
             st.write("**Filename:**", file_name)
             st.write("**Project Name (sanitized):**", project_name)
-            st.write("**Totals:**", totals)
+            st.write("**Totals keys present:**", [k for k, v in totals.items() if v is not None])
             st.write("**Comparison rows:**", len(df_compare))
+
+    # ---------- helper: show what’s missing ----------
+    @staticmethod
+    def _show_missing_hint(required_keys):
+        missing = [k for k in required_keys if not st.session_state.get(k)]
+        if missing:
+            st.warning(
+                "No results found in session. The following keys are missing in `st.session_state`: "
+                + ", ".join(missing)
+                + ".\n\n"
+                "Make sure your **Tool/Inputs** page sets these before visiting Results."
+            )
+        else:
+            st.info("Nothing to display yet. Please run the Tool/Inputs page first.")
