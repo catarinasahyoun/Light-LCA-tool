@@ -31,12 +31,11 @@ Version: 2.0 (Modular Architecture)
 """
 
 import sys
-import os, io
-from pathlib import Path
-
-# --- Global logo helpers ---
-from pathlib import Path
+import os
 import io
+from pathlib import Path
+import streamlit as st
+
 
 def load_tchai_logo_bytes():
     """Find the logo from stable repo paths first; fall back to /mnt/data."""
@@ -146,6 +145,10 @@ def main():
     if logo_bytes:
         # optional: also place the logo in the sidebar
         st.sidebar.image(logo_bytes, width=140)
+
+    if not logo_bytes:
+        logger.warning("TCHAI logo not found — check assets/tchai_logo.png or src/assets/tchai_logo.png")
+
     
     # Step 4: Bootstrap authentication system
     # Creates default admin user if no users exist
