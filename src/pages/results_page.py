@@ -177,12 +177,133 @@ class ResultsPage:
     # ---------- 2) RESULTS SUMMARY (second tab) ----------
     @staticmethod
     def _render_summary_section():
+        # ======= Styles for boxed KPIs =======
+        st.markdown(
+            """
+            <style>
+              .kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+              @media(max-width: 1024px){ .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+              @media(max-width: 640px){ .kpi-grid { grid-template-columns: 1fr; } }
+              .kpi-card {
+                border: 1px solid #e0e0e0; border-radius: 12px; padding: 16px;
+                background: #ffffff; box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+              }
+              .kpi-title { font-size: 13px; color: #2E7D32; margin: 0 0 8px 0; font-weight: 600; }
+              .kpi-value { font-size: 22px; margin: 0; font-weight: 700; }
+              .kpi-sub { font-size: 12px; color: #6b7280; margin-top: 6px; }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
         st.markdown("### Results Summary")
-        final_summary_html = st.session_state.get("final_summary_html", "")
-        if final_summary_html:
-            st.markdown(final_summary_html, unsafe_allow_html=True)
+
+        # ---- Pull the numbers from session (or fallbacks) ----
+        total_material_co2 = float(st.session_state.get("total_material_co2", 0.0) or 0.0)
+        total_process_co2  = float(st.session_state.get("total_process_co2", 0.0) or 0.0)
+        overall_co2        = float(st.session_state.get("overall_co2", total_material_co2 + total_process_co2) or 0.0)
+        weighted_recycled  = float(st.session_state.get("weighted_recycled", 0.0) or 0.0)
+
+        lifetime_weeks     = int(st.session_state.get("lifetime_weeks", 52) or 52)
+        lifetime_years     = max(lifetime_weeks / 52.0, 1e-9)  # avoid div/zero
+
+        # ---- Tree equivalent logic (no hard-coded 5 years) ----
+        TREE_SEQUESTRATION_PER_YEAR = 22.0  # kg CO2 per tree per year (simple signal)
+
+        mode = st.radio(
+            "Tree equivalent basis",
+            options=("Over lifetime", "Per year"),
+            index=0,
+            horizontal=True,
+            key="trees_mode_select",
+            help="Choose whether to express tree equivalent across the design's lifetime or per year.",
+        )
+
+        if mode == "Over lifetime":
+            trees_equiv = overall_co2 / (TREE_SEQUESTRATION_PER_YEAR * lifetime_years)
+            trees_label = f"{trees_equiv:.2f} trees over {lifetime_years:.1f} years"
+            trees_sub   = f"22 kg CO₂/tree/year · lifetime={lifetime_years:.1f} years"
         else:
-            ResultsPage._show_missing_hint(["final_summary_html"])
+            trees_equiv = overall_co2 / TREE_SEQUESTRATION_PER_YEAR
+            trees_label = f"{trees_equiv:.2f} trees / year"
+            trees_sub   = "22 kg CO₂/tree/year"
+
+        # ---- KPI Grid (boxed visuals) ----
+        st.markdown('<div class="kpi-grid">', unsafe_allow_html=True)
+
+        # Weighted Recycled
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+              <p class="kpi-title">Weighted Recycled Content</p>
+              <p class="kpi-value">{weighted_recycled:.1f}%</p>
+              <div class="kpi-sub">Mass-weighted across all selected materials</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Total CO2 - Materials
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+              <p class="kpi-title">Total CO₂ — Materials</p>
+              <p class="kpi-value">{total_material_co2:.2f} kg</p>
+              <div class="kpi-sub">Sum of (mass × CO₂e/kg) per material</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Total CO2 - Processes
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+              <p class="kpi-title">Total CO₂ — Processes</p>
+              <p class="kpi-value">{total_process_co2:.2f} kg</p>
+              <div class="kpi-sub">Sum of (amount × CO₂e/unit) for all steps</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Overall CO2
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+              <p class="kpi-title">Overall CO₂</p>
+              <p class="kpi-value">{overall_co2:.2f} kg</p>
+              <div class="kpi-sub">Materials + Processes</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Tree Equivalent (mode-aware)
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+              <p class="kpi-title">Tree Equivalent</p>
+              <p class="kpi-value">{trees_label}</p>
+              <div class="kpi-sub">{trees_sub}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Lifetime (display signal)
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+              <p class="kpi-title">Lifetime</p>
+              <p class="kpi-value">{lifetime_weeks} weeks</p>
+              <div class="kpi-sub">{lifetime_years:.1f} years</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # ---------- 3) REPORT (third tab; no “Export”) ----------
     @staticmethod
