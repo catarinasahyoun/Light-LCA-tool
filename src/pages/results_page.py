@@ -1,12 +1,25 @@
-import io
+import io, os
 import re
 import json
-import io
 import textwrap
 import pandas as pd
 import streamlit as st
 import plotly.express as px  # for charts
 
+from pathlib import Path
+
+def load_tchai_logo_bytes():
+    # check common repo + deploy paths
+    candidates = [
+        Path("assets/tchai_logo.png"),
+        Path("assets/logo/tchai_logo.png"),
+        Path("tchai_logo.png"),
+        Path("/mnt/data/tchai_logo.png"),  # fallback for uploaded logo
+    ]
+    for p in candidates:
+        if p.exists():
+            return p.read_bytes()
+    return None
 class ResultsPage:
     @staticmethod
     def _safe_slug(name: str) -> str:
