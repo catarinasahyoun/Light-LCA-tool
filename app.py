@@ -31,41 +31,43 @@ Version: 2.0 (Modular Architecture)
 """
 
 import sys
-import os
 import os, io
+import os
+import io
 from pathlib import Path
+import streamlit as st
 
 # --- Global logo helpers ---
 from pathlib import Path
 import io
 
 def load_tchai_logo_bytes():
-    """Find the logo from stable repo paths first; fall back to /mnt/data."""
-    candidates = [
-        Path("assets/tchai_logo.png"),
-        Path("assets/logo/tchai_logo.png"),
-        Path("tchai_logo.png"),
-        Path("/mnt/data/tchai_logo.png"),  # ephemeral fallback
-    ]
-    for p in candidates:
-        try:
-            if p.exists():
-                return p.read_bytes()
-        except Exception:
-            pass
-    return None
+"""Find the logo from stable repo paths first; fall back to /mnt/data."""
+candidates = [
+Path("assets/tchai_logo.png"),
+Path("assets/logo/tchai_logo.png"),
+Path("tchai_logo.png"),
+Path("/mnt/data/tchai_logo.png"),  # ephemeral fallback
+]
+for p in candidates:
+try:
+if p.exists():
+return p.read_bytes()
+except Exception:
+pass
+return None
 
 def show_global_logo():
-    """Render the logo at the very top of the page (left-aligned)."""
-    logo_bytes = st.session_state.get("tchai_logo_bytes")
-    if not logo_bytes:
-        return
-    left, right = st.columns([1, 8])
-    with left:
-        st.image(logo_bytes, width=150)
-    with right:
-        # spacer to keep header tight
-        st.markdown("&nbsp;", unsafe_allow_html=True)
+"""Render the logo at the very top of the page (left-aligned)."""
+logo_bytes = st.session_state.get("tchai_logo_bytes")
+if not logo_bytes:
+return
+left, right = st.columns([1, 8])
+with left:
+st.image(logo_bytes, width=150)
+with right:
+# spacer to keep header tight
+st.markdown("&nbsp;", unsafe_allow_html=True)
 
 # Add src directory to Python path for Streamlit Cloud compatibility
 current_dir = Path(__file__).parent
@@ -142,11 +144,15 @@ logger.info("TCHAI LCA Application started - Modular architecture v2.0")
 # Loads custom CSS, fonts, and color schemes
 UIStyles.apply_theme()
 
-    logo_bytes = load_tchai_logo_bytes()
-    st.session_state["tchai_logo_bytes"] = logo_bytes  # one source of truth for all pages
-    if logo_bytes:
-        # optional: also place the logo in the sidebar
-        st.sidebar.image(logo_bytes, width=140)
+logo_bytes = load_tchai_logo_bytes()
+st.session_state["tchai_logo_bytes"] = logo_bytes  # one source of truth for all pages
+if logo_bytes:
+# optional: also place the logo in the sidebar
+st.sidebar.image(logo_bytes, width=140)
+
+    if not logo_bytes:
+        logger.warning("TCHAI logo not found — check assets/tchai_logo.png or src/assets/tchai_logo.png")
+
 
 # Step 4: Bootstrap authentication system
 # Creates default admin user if no users exist
@@ -163,7 +169,7 @@ sidebar = Sidebar()
 page = sidebar.render()
 logger.debug(f"User navigated to page: {page}")
 
-    show_global_logo()
+show_global_logo()
 
 # Step 7: Render application header
 # Displays logo, title, and user information
