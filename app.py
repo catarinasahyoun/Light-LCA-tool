@@ -64,6 +64,9 @@ from src.pages import (
     UserGuidePage, 
     SettingsPage, 
     VersionsPage
+
+from src.pages.results_page import ResultsPage
+
 )
 
 
