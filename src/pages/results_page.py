@@ -1,6 +1,8 @@
 import io
 import re
 import json
+import io
+import textwrap
 import pandas as pd
 import streamlit as st
 import plotly.express as px  # for charts
@@ -320,7 +322,6 @@ class ResultsPage:
         Formats: DOCX (always) and PDF (if reportlab is installed)
         """
         import re
-        from io import BytesIO
 
         # --- deps ---
         try:
@@ -466,8 +467,7 @@ class ResultsPage:
 
             # Cover
             if logo_bytes:
-                from io import BytesIO
-                tmp = BytesIO(logo_bytes)
+                tmp = io.BytesIO(logo_bytes)
                 try:
                     doc.add_picture(tmp, width=Inches(1.6))
                     doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -546,13 +546,13 @@ class ResultsPage:
             _docx_heading(doc, "Conclusion", level=1)
             doc.add_paragraph(CONCLUSION_TEXT)
 
-            out = BytesIO()
+            out = io.BytesIO()
             doc.save(out)
             return out.getvalue()
 
         # ---------- simple PDF builder (one page summary) ----------
         def build_pdf() -> bytes:
-            buf = BytesIO()
+            buf = io.BytesIO()
             c = canvas.Canvas(buf, pagesize=A4)
             w, h = A4
             x = 50
@@ -567,7 +567,7 @@ class ResultsPage:
             # logo + title
             if logo_bytes:
                 try:
-                    c.drawImage(ImageReader(BytesIO(logo_bytes)), x, y-35, width=110, preserveAspectRatio=True, mask='auto')
+                    c.drawImage(ImageReader(io.BytesIO(logo_bytes)), x, y-35, width=110, preserveAspectRatio=True, mask='auto')
                 except Exception:
                     pass
             line(report_title, size=16, dy=22, bold=True); y -= 6
@@ -575,7 +575,7 @@ class ResultsPage:
 
             # intro
             line("Introduction", bold=True, dy=18)
-            for chunk in st.text_wrap(INTRO_TEXT, width=92) if hasattr(st, "text_wrap") else [INTRO_TEXT]:
+            for chunk in text_wrap(INTRO_TEXT, width=92) if hasattr(st, "text_wrap") else [INTRO_TEXT]:
                 line(chunk, size=9, dy=12)
 
             # KPIs
