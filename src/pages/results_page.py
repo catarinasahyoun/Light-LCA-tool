@@ -307,27 +307,14 @@ class ResultsPage:
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # ---------- 3) REPORT (third tab; DOCX/PDF only, custom title, TCHAI logo) ----------
+    # ---------- 3) REPORT (third tab; DOCX only, custom title, TCHAI logo top-left) ----------
     @staticmethod
     def _render_report_section(R):
-        """
-        Builds a Tchai-styled report with your exact reference text:
-        - Cover with logo + title + date
-        - Introduction (verbatim)
-        - Different tracks, shared direction
-        - Criteria bullets
-        - Materials Included in the Analysis (from selected materials)
-        - Considerations and Scope (verbatim)
-        - Material Comparison Overview (table)
-        - Conclusion (verbatim)
-        Outputs: DOCX (always) and PDF (if `reportlab` installed)
-        """
-        import io, re, textwrap
+        import io, re
         from io import BytesIO
         import pandas as pd
         import streamlit as st
 
-        # ---- deps for DOCX/PDF ----
         try:
             from docx import Document
             from docx.shared import Pt, Inches
@@ -337,17 +324,9 @@ class ResultsPage:
             st.error("Missing dependency: install `python-docx` to export DOCX reports.")
             return
 
-        try:
-            from reportlab.lib.pagesizes import A4
-            from reportlab.pdfgen import canvas
-            from reportlab.lib.utils import ImageReader
-            REPORTLAB_AVAILABLE = True
-        except Exception:
-            REPORTLAB_AVAILABLE = False
-
         st.markdown("### Report")
 
-        # ---------- verbatim text (from your reference) ----------
+        # ---------- static reference text ----------
         INTRO_TEXT = (
             "At Tchai we build differen: within every brand space we design we try to leave a "
             "positive mark on people and planet. Our Easy LCA tool helps us see the real footprint "
@@ -416,7 +395,7 @@ class ResultsPage:
         )
         df_compare = pd.DataFrame(comparison_data) if comparison_data else pd.DataFrame()
 
-        eol_summary = st.session_state.get("eol_summary", {})  # {material: EoL}
+        eol_summary = st.session_state.get("eol_summary", {})
         totals = {
             "total_material_co2": float(st.session_state.get("total_material_co2") or 0.0),
             "total_process_co2":  float(st.session_state.get("total_process_co2") or 0.0),
@@ -426,17 +405,12 @@ class ResultsPage:
         }
         lifetime_years = max(totals["lifetime_weeks"] / 52.0, 1e-9)
 
-        # Unique materials list for “Materials Included…”
+        # Unique materials list
         material_list = sorted(df_compare["Material"].dropna().unique().tolist()) if "Material" in df_compare else []
 
         # ---------- UI controls ----------
         default_title = f"Easy LCA Tool Report — {project_slug}"
         report_title = st.text_input("Report title", value=default_title, key="report_title_input")
-
-        fmt_options = ["DOCX (.docx)"] + (["PDF (.pdf)"] if REPORTLAB_AVAILABLE else [])
-        report_choice = st.selectbox("Format", fmt_options, index=0, key="report_format_choice")
-        if not REPORTLAB_AVAILABLE:
-            st.caption("Install `reportlab` to enable PDF export.")
 
         # ---------- logo loader ----------
         def _load_logo():
@@ -445,7 +419,6 @@ class ResultsPage:
                 "assets/logo/tchai_logo.png",
                 "assets/tchai_logo.png",
                 "tchai_logo.png",
-                "/mnt/data/516855fb-161c-4e3d-9eb8-b5d287df9507.png",  # fallback (the image you sent)
             ]:
                 try:
                     with open(p, "rb") as f:
@@ -456,20 +429,6 @@ class ResultsPage:
 
         logo_bytes = _load_logo()
 
-        # ---------- helpers ----------
-        def _docx_heading(doc, text, size=14, bold=True):
-            p = doc.add_paragraph()
-            r = p.add_run(text)
-            r.bold = bold
-            r.font.size = Pt(size)
-            return p
-
-        def _docx_bullets(doc, items):
-            for it in items:
-                para = doc.add_paragraph(style=None)
-                run = para.add_run(f"• {it}")
-                run.font.size = Pt(11)
-
         # ---------- DOCX builder ----------
         def build_docx() -> bytes:
             doc = Document()
@@ -479,7 +438,7 @@ class ResultsPage:
             sec.left_margin = Inches(0.7)
             sec.right_margin = Inches(0.7)
 
-            # Cover
+            # Cover: logo top-left
             if logo_bytes:
                 tmp = io.BytesIO(logo_bytes)
                 try:
@@ -487,6 +446,7 @@ class ResultsPage:
                     doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.LEFT
                 except Exception:
                     pass
+
             title_p = doc.add_paragraph()
             t = title_p.add_run(report_title)
             t.bold = True
@@ -496,32 +456,30 @@ class ResultsPage:
             meta.alignment = WD_ALIGN_PARAGRAPH.LEFT
             doc.add_paragraph("")
 
-            # Introduction (verbatim)
-            _docx_heading(doc, "Introduction", size=14)
+            # Sections
+            doc.add_heading("Introduction", level=1)
             doc.add_paragraph(INTRO_TEXT)
 
-            # Tracks + Criteria
-            _docx_heading(doc, "Different tracks, shared direction: sustainability", size=13)
+            doc.add_heading("Different tracks, shared direction", level=1)
             for para in TRACKS_TEXT.split("\n"):
                 if para.strip():
                     doc.add_paragraph(para.strip())
-            _docx_bullets(doc, CRITERIA_BULLETS)
+            for bullet in CRITERIA_BULLETS:
+                doc.add_paragraph(f"• {bullet}")
 
-            # Materials Included in the Analysis
-            _docx_heading(doc, "Materials Included in the Analysis", size=13)
+            doc.add_heading("Materials Included in the Analysis", level=1)
             if material_list:
-                _docx_bullets(doc, [m for m in material_list])
+                for m in material_list:
+                    doc.add_paragraph(f"• {m}")
             else:
                 doc.add_paragraph("—")
 
-            # Considerations and Scope (verbatim)
-            _docx_heading(doc, "Considerations and Scope", size=13)
+            doc.add_heading("Considerations and Scope", level=1)
             for para in CONSIDERATIONS_SCOPE.split("\n"):
                 if para.strip():
                     doc.add_paragraph(para.strip())
 
-            # KPIs (quick summary block)
-            _docx_heading(doc, "Results Summary (Key Figures)", size=13)
+            doc.add_heading("Results Summary (Key Figures)", level=1)
             tbl = doc.add_table(rows=0, cols=2)
             tbl.alignment = WD_TABLE_ALIGNMENT.LEFT
             tbl.style = "Light Grid"
@@ -534,48 +492,32 @@ class ResultsPage:
             add_kpi("Total CO₂ — Processes", f"{totals['total_process_co2']:.2f} kg")
             add_kpi("Overall CO₂", f"{totals['overall_co2']:.2f} kg")
             add_kpi("Tree Equivalent*", f"{(totals['overall_co2']/(22.0*lifetime_years)):.2f} trees over {lifetime_years:.1f} years")
+
             doc.add_paragraph("*Estimated number of trees required to sequester the CO₂e emissions over the project lifespan.")
 
-            # Material Comparison Overview (table)
-            _docx_heading(doc, "Material Comparison Overview", size=13)
-            # Columns required by your reference table
+            doc.add_heading("Material Comparison Overview", level=1)
             cols = ["Material", "CO2e per Unit (kg CO2e)", "Avg. Recycled Content", "Circularity", "End-of-Life", "Tree Equivalent*"]
             table = doc.add_table(rows=1, cols=len(cols))
             table.style = "Light Grid"
             hdr = table.rows[0].cells
             for j, col in enumerate(cols):
                 hdr[j].text = col
-
-            # Map from df_compare (best-effort)
-            # We derive:
-            # - CO2e per Unit from "CO2e per kg" if present (unit=kg)
-            # - Avg. Recycled Content from "Recycled Content (%)"
-            # - Circularity from either "Circularity (mapped)" or "Circularity (text)"
-            # - End-of-Life from eol_summary
-            # - Tree Equivalent per unit = (CO2e per unit) / (22 * lifetime_years)
-            for _, row in (df_compare if not df_compare.empty else pd.DataFrame(columns=["Material"])).iterrows():
+            for _, row in df_compare.iterrows():
                 mat = str(row.get("Material", ""))
-                co2_per_unit = float(row.get("CO2e per kg", 0.0) or 0.0)  # treating 1 unit = 1 kg
+                co2 = float(row.get("CO2e per kg", 0.0) or 0.0)
                 rec = row.get("Recycled Content (%)", "")
                 circ = row.get("Circularity (text)", row.get("Circularity (mapped)", ""))
                 eol = eol_summary.get(mat, "")
-                tree_eq_unit = (co2_per_unit / (22.0 * lifetime_years)) if lifetime_years > 0 else 0.0
-
+                tree_eq = co2/(22.0*lifetime_years) if lifetime_years>0 else 0
                 cells = table.add_row().cells
                 cells[0].text = mat
-                cells[1].text = f"{co2_per_unit:.2f}"
+                cells[1].text = f"{co2:.2f}"
                 cells[2].text = f"{rec}" if rec == "" else f"{float(rec):.1f}%"
                 cells[3].text = str(circ)
                 cells[4].text = str(eol)
-                cells[5].text = f"{tree_eq_unit:.2f}"
+                cells[5].text = f"{tree_eq:.2f}"
 
-            if df_compare.empty:
-                row = table.add_row().cells
-                row[0].text = "—"
-                for j in range(1, len(cols)):
-                    row[j].text = ""
-
-            # Conclusion (verbatim)
+            doc.add_heading("Conclusion", level=1)
             for para in CONCLUSION_TEXT.split("\n"):
                 if para.strip():
                     doc.add_paragraph(para.strip())
@@ -584,62 +526,10 @@ class ResultsPage:
             doc.save(out)
             return out.getvalue()
 
-        # ---------- PDF builder (one-page summary with your intro) ----------
-        def build_pdf() -> bytes:
-            buf = io.BytesIO()
-            c = canvas.Canvas(buf, pagesize=A4)
-            w, h = A4
-            x = 50
-            y = h - 50
-
-            def line(text, font="Helvetica", size=10, dy=14, bold=False):
-                nonlocal y
-                c.setFont("Helvetica-Bold" if bold else font, size)
-                c.drawString(x, y, text)
-                y -= dy
-
-            # Logo + Title
-            if logo_bytes:
-                try:
-                    c.drawImage(ImageReader(io.BytesIO(logo_bytes)), x, y-35, width=110, preserveAspectRatio=True, mask='auto')
-                except Exception:
-                    pass
-            line(report_title, size=16, dy=22, bold=True); y -= 6
-            line(f"Project: {project_name or project_slug}   ·   Date: {pd.Timestamp.now():%Y-%m-%d}", size=9, dy=16)
-
-            # Introduction (wrap)
-            line("Introduction", bold=True, dy=18)
-            for chunk in textwrap.wrap(INTRO_TEXT, width=92):
-                line(chunk, size=9, dy=12)
-
-            # Results quick KPIs
-            y -= 6
-            line("Results Summary (Key Figures)", bold=True, dy=18)
-            line(f"Weighted Recycled Content: {totals['weighted_recycled']:.1f} %", size=9)
-            line(f"Total CO₂ — Materials: {totals['total_material_co2']:.2f} kg", size=9)
-            line(f"Total CO₂ — Processes: {totals['total_process_co2']:.2f} kg", size=9)
-            line(f"Overall CO₂: {totals['overall_co2']:.2f} kg", size=9)
-            line(f"Tree Equivalent*: {(totals['overall_co2']/(22.0*lifetime_years)):.2f} trees over {lifetime_years:.1f} years", size=9)
-            line("*Estimated number of trees required to sequester the CO₂e emissions over the project lifespan.", size=7, dy=10)
-
-            # Footer
-            c.setFont("Helvetica-Oblique", 8)
-            c.drawRightString(w-40, 28, "Generated with TCHAI Easy LCA Tool")
-            c.showPage(); c.save()
-            return buf.getvalue()
-
-        # ---------- build + download ----------
-        if report_choice.startswith("DOCX"):
-            data_bytes = build_docx()
-            file_name = f"{_safe_slug(report_title)}.docx"
-            mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        else:
-            if not REPORTLAB_AVAILABLE:
-                st.error("PDF export unavailable (install `reportlab`).")
-                return
-            data_bytes = build_pdf()
-            file_name = f"{_safe_slug(report_title)}.pdf"
-            mime = "application/pdf"
+        # ---------- build + download (DOCX only) ----------
+        data_bytes = build_docx()
+        file_name = f"{_safe_slug(report_title)}.docx"
+        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
         st.download_button(
             label=f"⬇️ Download {file_name}",
